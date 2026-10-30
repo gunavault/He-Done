@@ -91,6 +91,19 @@ Ganti ID dengan ID voice channel biasa di server yang sama. `CHANNEL_ID` tetap m
 
 Default pengingat sekarang **H-30 dan H-15**. Jika `.env` atau Startup masih berisi `REMINDER_MINUTES=30,15,5,0`, ubah menjadi `30,15`; kode tidak menimpa environment aktif. Rekaman hanya tersedia untuk H-30/H-15. Jika offset lain sengaja dikonfigurasi, pesan teks tetap mengikuti offset itu, tetapi voice melewatinya.
 
+### Tes rekaman H-30/H-15 langsung
+
+Jalankan satu per satu saat berada di voice channel tujuan:
+
+```text
+/tesvoice index:3.1 menit:30
+/tesvoice index:3.1 menit:15
+```
+
+Perintah langsung memutar `3_1_h30.mp3` atau `3_1_h15.mp3`, lalu MP3 penutup, dan bot keluar. Angka menit memilih jenis rekaman; bukan menunggu 30/15 menit. Jalankan tes kedua setelah tes pertama selesai. Timer spawn, status pengiriman terjadwal, dan notifikasi teks tidak berubah.
+
+Tanpa opsi, `/tesvoice` tetap memutar `test.mp3`. Opsi index dan menit harus diisi bersama. Mendukung juga 3.2, 4.1, dan 4.3; memerlukan Manage Server dan voice aktif. Setelah memperbarui kode, restart bot agar opsi baru tersinkronisasi ke Discord.
+
 ### Volume pengumuman
 
 `VOICE_VOLUME=3.0` adalah default baru untuk memperkuat rekaman, termasuk `test.mp3` dan MP3 penutup. `1.0` berarti amplitudo asli, `2.0` dua kali, dan `3.0` tiga kali. Nilai yang diterima 0.1–5.0; gunakan titik untuk desimal. FFmpeg memakai limiter puncak 0.95 agar penguatan tidak langsung memotong puncak sinyal. File MP3 asli tidak diubah.

@@ -241,6 +241,31 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send_notice.assert_awaited_once()
         self.bot.voice.announce.assert_not_awaited()
 
+    async def test_voice_index31_h30_h15_select_correct_recordings_without_changing_timers(self):
+        await self.update_timer(index='3.1', waktu='11:20')
+        original_timers = self.bot.store.timers(self.bot.guild_id)
+        self.bot.voice.channel_id = 888
+        self.bot.voice.announce = AsyncMock(return_value=True)
+        command = self.bot.tree.get_command('tesvoice')
+        parameters = {parameter.name: parameter for parameter in command.parameters}
+        self.assertEqual([choice.value for choice in parameters['menit'].choices], [30, 15])
+        for offset in (30, 15):
+            interaction = AsyncMock()
+            await command.callback(interaction, index='3.1', menit=offset)
+            reminder = self.bot.voice.announce.call_args.args[0]
+            self.assertEqual((reminder.index, reminder.minutes_before), ('3.1', offset))
+            self.assertEqual(self.bot.voice.recording_for(reminder).name, f'3_1_h{offset}.mp3')
+            self.assertIn(f'index 3.1 H-{offset}', interaction.followup.send.call_args.args[0])
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id), original_timers)
+        self.bot.send_notice.assert_not_awaited()
+
+    async def test_voice_index_test_rejects_partial_or_unsupported_options(self):
+        command = self.bot.tree.get_command('tesvoice')
+        for values in ({'index': '3.1'}, {'menit': 30},
+                       {'index': '3.1', 'menit': 5}, {'index': '9.9', 'menit': 30}):
+            with self.assertRaises(ValueError):
+                await command.callback(AsyncMock(), **values)
+
     def fake_destination(self, *, channel_cached=True, member_cached=True):
         role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)
         member = SimpleNamespace(id=999)

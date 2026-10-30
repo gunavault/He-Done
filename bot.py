@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES, Reminder
 
 from voice_alerts import VoiceAnnouncer
 
@@ -136,19 +136,34 @@ class TrexBot(discord.Client):
         @app_commands.default_permissions(manage_guild=True)
         @app_commands.checks.has_permissions(manage_guild=True)
         @app_commands.check(check_server)
-        async def tesvoice(interaction: discord.Interaction):
+        @app_commands.choices(
+            index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES],
+            menit=[app_commands.Choice(name='H-30 menit', value=30),
+                   app_commands.Choice(name='H-15 menit', value=15)])
+        @app_commands.describe(index='Opsional: pilih index rekaman yang ingin diuji',
+                               menit='Isi bersama index: H-30 atau H-15; langsung diputar sekarang')
+        async def tesvoice(interaction: discord.Interaction, index: str | None = None,
+                           menit: int | None = None):
+            if (index is None) != (menit is None):
+                raise ValueError('Isi keduanya: /tesvoice index:3.1 menit:30. Tanpa opsi untuk test.mp3.')
+            if index is not None and (index not in SUPPORTED_INDICES or menit not in (30, 15)):
+                raise ValueError('Pilih index 3.1, 3.2, 4.1, atau 4.3 dan menit 30 atau 15.')
             await interaction.response.defer(ephemeral=True)
             if not self.voice.enabled:
                 raise ValueError('Voice belum aktif. Isi VOICE_CHANNEL_ID lalu restart bot.')
             try:
-                await self.voice.announce()
+                if index is None:
+                    await self.voice.announce()
+                else:
+                    await self.voice.announce(Reminder(index, datetime.now(WIB), menit))
             except Exception as exc:
                 log.warning('Tes voice gagal: %s', exc)
                 await interaction.followup.send(
                     'Tes voice gagal. Periksa izin Connect/Speak, dependencies voice, '
                     'dan koneksi jaringan. Detail ada di Console Wispbyte.', ephemeral=True)
             else:
-                await interaction.followup.send('Tes suara selesai. Bot sudah keluar dari voice channel.', ephemeral=True)
+                label = f' index {index} H-{menit}' if index is not None else ''
+                await interaction.followup.send(f'Tes suara{label} selesai. Bot sudah keluar dari voice channel.', ephemeral=True)
 
         self.tree.on_error = self.command_error
 
