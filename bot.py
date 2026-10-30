@@ -36,7 +36,7 @@ class TrexBot(discord.Client):
                 ('3.1', 'INDEX_31_TIMES', '11:20,18:00'),
                 ('3.2', 'INDEX_32_TIMES', '12:47,19:27'))
              for at in parse_times(os.getenv(env_name, default))], key=lambda slot: slot[1]))
-        self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15'))
+        self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15,0'))
         path = Path(os.getenv('DB_PATH', 'data/trex.sqlite3'))
         if not path.is_absolute():
             path = ROOT / path
@@ -147,15 +147,16 @@ class TrexBot(discord.Client):
         @app_commands.choices(
             index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES],
             menit=[app_commands.Choice(name='H-30 menit', value=30),
-                   app_commands.Choice(name='H-15 menit', value=15)])
+                   app_commands.Choice(name='H-15 menit', value=15),
+                   app_commands.Choice(name='Saat spawn (H-0)', value=0)])
         @app_commands.describe(index='Opsional: pilih index rekaman yang ingin diuji',
-                               menit='Isi bersama index: H-30 atau H-15; langsung diputar sekarang')
+                               menit='Isi bersama index: H-30, H-15, atau H-0; langsung diputar sekarang')
         async def tesvoice(interaction: discord.Interaction, index: str | None = None,
                            menit: int | None = None):
             if (index is None) != (menit is None):
                 raise ValueError('Isi keduanya: /tesvoice index:3.1 menit:30. Tanpa opsi untuk test.mp3.')
-            if index is not None and (index not in SUPPORTED_INDICES or menit not in (30, 15)):
-                raise ValueError('Pilih index 3.1, 3.2, 4.1, atau 4.3 dan menit 30 atau 15.')
+            if index is not None and (index not in SUPPORTED_INDICES or menit not in (30, 15, 0)):
+                raise ValueError('Pilih index 3.1, 3.2, 4.1, atau 4.3 dan menit 30, 15, atau 0.')
             await interaction.response.defer(ephemeral=True)
             if not self.voice.enabled:
                 raise ValueError('Voice belum aktif. Isi VOICE_CHANNEL_ID lalu restart bot.')

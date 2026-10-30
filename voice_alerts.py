@@ -13,6 +13,7 @@ log = logging.getLogger('trex.voice')
 
 RECORDINGS = {(index, minutes): f'{index.replace(".", "_")}_h{minutes}.mp3'
               for index in SUPPORTED_INDICES for minutes in (30, 15)}
+RECORDINGS.update({(index, 0): "spawn.mp3" for index in SUPPORTED_INDICES})
 
 
 class VoiceAnnouncer:
@@ -71,7 +72,7 @@ class VoiceAnnouncer:
         if reminder is None:
             return self.audio_dir / 'test.mp3'
         if not self.supports(reminder):
-            raise ValueError('Rekaman voice tersedia hanya untuk index 3.1, 3.2, 4.1, 4.3 pada H-30/H-15.')
+            raise ValueError('Rekaman voice tersedia hanya untuk index 3.1, 3.2, 4.1, 4.3 pada H-30/H-15/H-0.')
         return self.audio_dir / RECORDINGS[(reminder.index, reminder.minutes_before)]
 
     def audio_source(self, path):
@@ -116,7 +117,9 @@ class VoiceAnnouncer:
                     path = self.recording_for(reminder)
                     if not path.is_file():
                         raise ValueError(f'Rekaman tidak ditemukan: {path}. Perbarui folder assets/voice.')
-                    if self.outro_path is not None and not self.outro_path.is_file():
+                    outro_path = (None if reminder is not None and reminder.minutes_before == 0
+                                  else self.outro_path)
+                    if outro_path is not None and not outro_path.is_file():
                         raise ValueError('Audio penutup tidak ditemukan. Perbarui assets/outro.mp3 '
                                          'atau periksa VOICE_OUTRO_PATH.')
                     channel = await self.destination()
@@ -129,8 +132,8 @@ class VoiceAnnouncer:
                     if not is_current():
                         return False
                     await self.play_track(voice_client, path)
-                    if self.outro_path is not None:
-                        await self.play_track(voice_client, self.outro_path)
+                    if outro_path is not None:
+                        await self.play_track(voice_client, outro_path)
                     log.info('Rekaman voice selesai: channel_id=%s file=%s', self.channel_id, path.name)
                     return True
             finally:

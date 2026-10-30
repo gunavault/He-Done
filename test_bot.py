@@ -239,6 +239,20 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.voice.announce.assert_awaited_once()
         self.assertEqual(self.bot.voice.announce.call_args.args[0].minutes_before, 30)
 
+    async def test_spawn_trigger_sends_text_and_shared_voice_once(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.announce = AsyncMock(return_value=True)
+        now = datetime(2026, 10, 30, 18, 0, tzinfo=WIB)
+        await self.bot.deliver_due(now)
+        await self.flush_voice()
+        await self.bot.deliver_due(now + timedelta(seconds=5))
+        await self.flush_voice()
+        self.bot.send_notice.assert_awaited_once()
+        self.bot.voice.announce.assert_awaited_once()
+        reminder = self.bot.voice.announce.call_args.args[0]
+        self.assertEqual((reminder.index, reminder.minutes_before), ('3.1', 0))
+        self.assertEqual(self.bot.voice.recording_for(reminder).name, 'spawn.mp3')
+
     async def test_voice_failure_retries_without_resending_text(self):
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(side_effect=RuntimeError('TTS offline'))
@@ -301,7 +315,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.voice.announce = AsyncMock(return_value=True)
         command = self.bot.tree.get_command('tesvoice')
         parameters = {parameter.name: parameter for parameter in command.parameters}
-        self.assertEqual([choice.value for choice in parameters['menit'].choices], [30, 15])
+        self.assertEqual([choice.value for choice in parameters['menit'].choices], [30, 15, 0])
         for offset in (30, 15):
             interaction = AsyncMock()
             await command.callback(interaction, index='3.1', menit=offset)
@@ -310,6 +324,15 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(self.bot.voice.recording_for(reminder).name, f'3_1_h{offset}.mp3')
             self.assertIn(f'index 3.1 H-{offset}', interaction.followup.send.call_args.args[0])
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), original_timers)
+        self.bot.send_notice.assert_not_awaited()
+
+    async def test_spawn_voice_test_selects_shared_recording(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.announce = AsyncMock(return_value=True)
+        await self.bot.tree.get_command('tesvoice').callback(AsyncMock(), index='3.1', menit=0)
+        reminder = self.bot.voice.announce.call_args.args[0]
+        self.assertEqual(reminder.minutes_before, 0)
+        self.assertEqual(self.bot.voice.recording_for(reminder).name, 'spawn.mp3')
         self.bot.send_notice.assert_not_awaited()
 
     async def test_voice_index_test_rejects_partial_or_unsupported_options(self):

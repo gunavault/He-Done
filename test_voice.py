@@ -178,15 +178,29 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_eight_recording_mappings_and_files(self):
         start = daily_reminders(date(2026, 10, 30))[0].start
-        self.assertEqual(len(RECORDINGS), 8)
+        self.assertEqual(len(RECORDINGS), 12)
         for index in SUPPORTED_INDICES:
             for offset in (30, 15):
                 reminder = Reminder(index, start, offset)
                 path = self.announcer.recording_for(reminder)
                 self.assertEqual(path.name, f'{index.replace(".", "_")}_h{offset}.mp3')
                 self.assertTrue(path.is_file())
-        for offset in (5, 0):
+        for offset in (5, 3, 1):
             reminder = Reminder('3.1', start, offset)
             self.assertFalse(self.announcer.supports(reminder))
             with self.assertRaises(ValueError):
                 self.announcer.recording_for(reminder)
+
+    async def test_spawn_uses_shared_battle_recording_without_outro(self):
+        start = daily_reminders(date(2026, 10, 30))[0].start
+        self.announcer.outro_path = Path('/nonexistent/outro.mp3')
+        self.announcer.play_track = AsyncMock()
+        for index in SUPPORTED_INDICES:
+            reminder = Reminder(index, start, 0)
+            path = self.announcer.recording_for(reminder)
+            self.assertEqual(path.name, 'spawn.mp3')
+            self.assertTrue(path.is_file())
+            self.announcer.play_track.reset_mock()
+            self.assertTrue(await self.announcer.announce(reminder))
+            self.assertEqual([c.args[1] for c in self.announcer.play_track.await_args_list],
+                             [path])

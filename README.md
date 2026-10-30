@@ -53,7 +53,7 @@ Pemilik server/admin yang tidak memiliki role tersebut juga tidak dapat mengedit
 | 3.1 | 17:30 | 17:45 | 17:55 | 18:00 |
 | 3.2 | 18:57 | 19:12 | 19:22 | 19:27 |
 
-**Semua jam di atas WIB.** Tabel juga menampilkan referensi H-5 dan saat spawn; konfigurasi default sekarang hanya H-30/H-15. Untuk empat slot default ada 8 pesan per hari. Setelah kedua index awal diperbarui menjadi satu jendela per index, ada 4 pesan per hari (belum termasuk index tambahan yang diaktifkan). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
+**Semua jam di atas WIB.** Tabel juga menampilkan referensi H-5 dan saat spawn; konfigurasi default sekarang H-30/H-15/H-0. Untuk empat slot default ada 12 pesan per hari. Setelah kedua index awal diperbarui menjadi satu jendela per index, ada 6 pesan per hari (belum termasuk index tambahan yang diaktifkan). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
 
 Contoh pesan pada 10:50 WIB:
 
@@ -66,7 +66,7 @@ Tanggal spawn: 31-10-2026
 
 ## Pengumuman suara dari MP3
 
-Bot kini memakai **9 rekaman MP3 dari pengguna**, tanpa sintesis TTS online. Pada H-30 dan H-15 bot masuk ke voice channel, memutar rekaman sesuai index, melanjutkan MP3 penutup `assets/outro.mp3`, lalu keluar. `/tesvoice` memakai `test.mp3` dan MP3 penutup yang sama. Isi ucapan/RAWWRRRRR mengikuti rekaman asli; bot tidak menambahkan ucapan TTS lagi.
+Bot kini memakai **10 rekaman MP3 dari pengguna**, tanpa sintesis TTS online. Pada H-30 dan H-15 bot masuk ke voice channel, memutar rekaman sesuai index, melanjutkan MP3 penutup `assets/outro.mp3`, lalu keluar. Pada H-0 bot memutar seruan komando tanpa penutup lalu keluar. `/tesvoice` memakai `test.mp3` dan MP3 penutup yang sama. Isi ucapan/RAWWRRRRR mengikuti rekaman asli; bot tidak menambahkan ucapan TTS lagi.
 
 | Index | H-30 | H-15 |
 | --- | --- | --- |
@@ -75,6 +75,8 @@ Bot kini memakai **9 rekaman MP3 dari pengguna**, tanpa sintesis TTS online. Pad
 | 4.1 | `assets/voice/4_1_h30.mp3` | `assets/voice/4_1_h15.mp3` |
 | 4.3 | `assets/voice/4_3_h30.mp3` | `assets/voice/4_3_h15.mp3` |
 | Tes | `assets/voice/test.mp3` | — |
+
+H-0 semua index memakai `assets/voice/spawn.mp3` (seruan komando dari unggahan pengguna), **tanpa MP3 penutup**. `/tesvoice index:3.1 menit:0` langsung memutarnya lalu bot keluar. H-0 mengacu ke awal jendela perkiraan, bukan deteksi spawn dalam game.
 
 Semua rekaman disalin dari unggahan pengguna tanpa mengubah audio. Nama file dinormalisasi agar pemilihannya konsisten.
 
@@ -89,7 +91,7 @@ VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
 VOICE_AUDIO_DIR=assets/voice
 VOICE_VOLUME=5.0
 VOICE_OUTRO_PATH=assets/outro.mp3
-REMINDER_MINUTES=30,15
+REMINDER_MINUTES=30,15,0
 ```
 
 Ganti ID dengan ID voice channel biasa di server yang sama. `CHANNEL_ID` tetap memakai ID channel **teks** untuk pesan bertag role. Kosongkan `VOICE_CHANNEL_ID` untuk mematikan suara. `TTS_VOICE` tidak lagi digunakan dan boleh dihapus.
@@ -97,15 +99,16 @@ Ganti ID dengan ID voice channel biasa di server yang sama. `CHANNEL_ID` tetap m
 4. Beri bot izin **View Channel, Connect, dan Speak**. Bot harus tidak di-server-mute. Tidak perlu Administrator.
 5. Restart, masuk ke voice channel tujuan, lalu jalankan **`/tesvoice`** dengan akun Manage Server. Log startup menampilkan `mode=recorded_mp3`.
 
-Default pengingat sekarang **H-30 dan H-15**. Jika `.env` atau Startup masih berisi `REMINDER_MINUTES=30,15,5,0`, ubah menjadi `30,15`; kode tidak menimpa environment aktif. Rekaman hanya tersedia untuk H-30/H-15. Jika offset lain sengaja dikonfigurasi, pesan teks tetap mengikuti offset itu, tetapi voice melewatinya.
+Default pengingat sekarang **H-30, H-15, dan H-0**. Ubah environment aktif menjadi `REMINDER_MINUTES=30,15,0` untuk mengaktifkan pengumuman tepat pada awal perkiraan spawn; kode tidak menimpa environment aktif. Untuk tetap memakai pengingat teks H-5/H-3/H-1, gunakan `REMINDER_MINUTES=30,15,5,3,1,0`. Rekaman tersedia untuk H-30/H-15/H-0; offset lain hanya mengirim teks dan tag role.
 
-### Tes rekaman H-30/H-15 langsung
+### Tes rekaman H-30/H-15/H-0 langsung
 
 Jalankan satu per satu saat berada di voice channel tujuan:
 
 ```text
 /tesvoice index:3.1 menit:30
 /tesvoice index:3.1 menit:15
+/tesvoice index:3.1 menit:0
 ```
 
 Perintah langsung memutar `3_1_h30.mp3` atau `3_1_h15.mp3`, lalu MP3 penutup, dan bot keluar. Angka menit memilih jenis rekaman; bukan menunggu 30/15 menit. Jalankan tes kedua setelah tes pertama selesai. Timer spawn, status pengiriman terjadwal, dan notifikasi teks tidak berubah.
@@ -150,14 +153,14 @@ CHANNEL_ID=234567890123456789
 ROLE_ID=345678901234567890
 INDEX_31_TIMES=11:20,18:00
 INDEX_32_TIMES=12:47,19:27
-REMINDER_MINUTES=30,15
+REMINDER_MINUTES=30,15,0
 DB_PATH=data/trex.sqlite3
 ```
 
 Angka ID di atas hanya contoh. Gunakan ID asli; role dan channel harus berada di server yang sama. Jangan menggunakan ID @everyone.
 
 - `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Dipakai hanya untuk index yang belum diperbarui lewat `/trex`.
-- `REMINDER_MINUTES`: menit sebelum awal jendela spawn. Default `30,15` berarti H-30 dan H-15.
+- `REMINDER_MINUTES`: menit sebelum awal jendela spawn. Default `30,15,0` berarti H-30, H-15, dan saat awal perkiraan spawn.
 - Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (3 pesan per jendela spawn).
 - Restart bot setelah mengubah konfigurasi. Pada Docker Compose jalankan ulang `docker compose up -d --build` agar environment baru diterapkan.
 
