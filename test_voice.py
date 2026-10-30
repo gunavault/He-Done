@@ -157,7 +157,7 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_volume_configuration_accepts_gain_and_rejects_invalid_values(self):
         with patch.dict(os.environ, {}, clear=False):
             os.environ.pop('VOICE_VOLUME', None)
-            self.assertEqual(VoiceAnnouncer(self.client, 123).volume, 3.0)
+            self.assertEqual(VoiceAnnouncer(self.client, 123).volume, 5.0)
         for value in ('0.1', '1', '2.5', '5'):
             with patch.dict(os.environ, {'VOICE_VOLUME': value}):
                 self.assertEqual(VoiceAnnouncer(self.client, 123).volume, float(value))

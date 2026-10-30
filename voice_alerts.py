@@ -32,7 +32,7 @@ class VoiceAnnouncer:
         if self.outro_path is not None and not self.outro_path.is_absolute():
             self.outro_path = Path(__file__).resolve().parent / self.outro_path
         try:
-            self.volume = float(os.getenv('VOICE_VOLUME', '3.0'))
+            self.volume = float(os.getenv('VOICE_VOLUME', '5.0'))
         except ValueError:
             raise ValueError('VOICE_VOLUME harus angka antara 0.1 dan 5.0.') from None
         if not math.isfinite(self.volume) or not 0.1 <= self.volume <= 5.0:

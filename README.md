@@ -87,7 +87,7 @@ Semua rekaman disalin dari unggahan pengguna tanpa mengubah audio. Nama file din
 ```ini
 VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
 VOICE_AUDIO_DIR=assets/voice
-VOICE_VOLUME=3.0
+VOICE_VOLUME=5.0
 VOICE_OUTRO_PATH=assets/outro.mp3
 REMINDER_MINUTES=30,15
 ```
@@ -114,7 +114,7 @@ Tanpa opsi, `/tesvoice` tetap memutar `test.mp3`. Opsi index dan menit harus dii
 
 ### Volume pengumuman
 
-`VOICE_VOLUME=3.0` adalah default baru untuk memperkuat rekaman, termasuk `test.mp3` dan MP3 penutup. `1.0` berarti amplitudo asli, `2.0` dua kali, dan `3.0` tiga kali. Nilai yang diterima 0.1–5.0; gunakan titik untuk desimal. FFmpeg memakai limiter puncak 0.95 agar penguatan tidak langsung memotong puncak sinyal. File MP3 asli tidak diubah.
+`VOICE_VOLUME=5.0` adalah default baru untuk memperkuat rekaman, termasuk `test.mp3` dan MP3 penutup. `1.0` berarti amplitudo asli, `2.0` dua kali, `3.0` tiga kali, dan `5.0` lima kali. Nilai yang diterima 0.1–5.0; gunakan titik untuk desimal. FFmpeg memakai limiter puncak 0.95 agar penguatan tidak langsung memotong puncak sinyal. File MP3 asli tidak diubah.
 
 Setelah memperbarui kode, isi/ubah `VOICE_VOLUME` pada `.env` atau Startup Wispbyte, restart bot, lalu jalankan `/tesvoice`. Pengaturan volume pengguna di Discord tetap ikut menentukan keras suara yang terdengar.
 
