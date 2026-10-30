@@ -3,8 +3,9 @@ import tempfile
 import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, Mock, MagicMock, patch
 from types import SimpleNamespace
+import discord
 from discord import app_commands
 
 from bot import TrexBot
@@ -128,6 +129,64 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.update_timer(waktu='bad')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), previous)
+
+    def fake_destination(self, *, channel_cached=True, member_cached=True):
+        role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)
+        member = SimpleNamespace(id=999)
+        guild = SimpleNamespace(id=123, name='Test guild', unavailable=False,
+            get_role=Mock(return_value=role), me=member if member_cached else None,
+            fetch_member=AsyncMock(return_value=member))
+        channel = MagicMock(spec=discord.TextChannel)
+        channel.id = 456
+        channel.guild = guild
+        channel.permissions_for.return_value = SimpleNamespace(
+            view_channel=True, send_messages=True, mention_everyone=False)
+        guild.get_channel = Mock(return_value=channel if channel_cached else None)
+        guild.fetch_channel = AsyncMock(return_value=channel)
+        self.bot._connection.user = SimpleNamespace(id=999)
+        return guild, channel, role
+
+    async def test_missing_guild_cache_fetches_guild_channel_and_self(self):
+        guild, channel, role = self.fake_destination(channel_cached=False, member_cached=False)
+        self.bot.get_guild = Mock(return_value=None)
+        self.bot.fetch_guild = AsyncMock(return_value=guild)
+        self.assertEqual(await self.bot.destination(), (channel, role))
+        self.bot.fetch_guild.assert_awaited_once_with(123)
+        guild.fetch_channel.assert_awaited_once_with(456)
+        guild.fetch_member.assert_awaited_once_with(999)
+
+    async def test_cached_destination_avoids_api_fetch(self):
+        guild, channel, role = self.fake_destination()
+        self.bot.get_guild = Mock(return_value=guild)
+        self.bot.fetch_guild = AsyncMock()
+        self.assertEqual(await self.bot.destination(), (channel, role))
+        self.bot.fetch_guild.assert_not_awaited()
+        guild.fetch_channel.assert_not_awaited()
+        guild.fetch_member.assert_not_awaited()
+
+    async def test_unavailable_guild_refreshes_and_permissions_still_checked(self):
+        guild, channel, _ = self.fake_destination()
+        self.bot.get_guild = Mock(return_value=SimpleNamespace(unavailable=True))
+        self.bot.fetch_guild = AsyncMock(return_value=guild)
+        channel.permissions_for.return_value.send_messages = False
+        with self.assertRaisesRegex(ValueError, 'Send Messages'):
+            await self.bot.destination()
+        self.bot.fetch_guild.assert_awaited_once()
+
+    async def test_wrong_guild_channel_is_rejected(self):
+        guild, channel, _ = self.fake_destination()
+        self.bot.get_guild = Mock(return_value=guild)
+        channel.guild = SimpleNamespace(id=99999)
+        with self.assertRaisesRegex(ValueError, 'GUILD_ID'):
+            await self.bot.destination()
+
+    async def test_api_denial_reports_active_bot_and_guild(self):
+        self.bot._connection.user = SimpleNamespace(id=999)
+        self.bot.get_guild = Mock(return_value=None)
+        response = SimpleNamespace(status=403, reason='Forbidden')
+        self.bot.fetch_guild = AsyncMock(side_effect=discord.Forbidden(response, 'Missing Access'))
+        with self.assertRaisesRegex(ValueError, 'server 123.*HTTP 403.*bot_id aktif=999'):
+            await self.bot.destination()
 
     async def test_commands_and_role_mention_scope(self):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'trex', 'jadwal', 'tes'})

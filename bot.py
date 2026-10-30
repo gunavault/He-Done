@@ -129,22 +129,48 @@ class TrexBot(discord.Client):
         self.notify.start()
 
     async def on_ready(self):
-        log.info('Bot %s terhubung; jadwal harian WIB=%s, pengingat=%s menit',
-                 self.user, self.slots, self.offsets)
+        log.info('Bot terhubung: user=%s bot_id=%s; GUILD_ID=%s CHANNEL_ID=%s ROLE_ID=%s; '
+                 'guilds_intent=%s; cached_guilds=%s; pengingat=%s menit',
+                 self.user, self.user.id if self.user else None, self.guild_id,
+                 self.channel_id, self.role_id, self.intents.guilds,
+                 [(guild.id, guild.name) for guild in self.guilds], self.offsets)
+        try:
+            channel, role = await self.destination()
+        except (discord.HTTPException, ValueError) as exc:
+            log.warning('Validasi tujuan gagal saat startup: %s', exc)
+        else:
+            log.info('Tujuan siap: guild_id=%s channel_id=%s role_id=%s',
+                     channel.guild.id, channel.id, role.id)
 
     async def destination(self):
         guild = self.get_guild(self.guild_id)
-        if guild is None:
-            raise ValueError('Bot belum tergabung di GUILD_ID yang diatur.')
+        if guild is None or guild.unavailable:
+            # A cache miss doesn't prove that the bot isn't a member. Verify through REST.
+            log.warning('Guild %s belum tersedia di cache; memeriksa Discord API. '
+                        'bot_id=%s cached_guild_ids=%s', self.guild_id,
+                        self.user.id if self.user else None, [g.id for g in self.guilds])
+            try:
+                guild = await self.fetch_guild(self.guild_id)
+            except (discord.Forbidden, discord.NotFound) as exc:
+                raise ValueError(
+                    f'Discord API menolak akses server {self.guild_id} (HTTP {exc.status}); '
+                    f'bot_id aktif={self.user.id if self.user else None}. '
+                    'Cocokkan ID bot ini dengan bot yang diundang, serta GUILD_ID aktif di Startup/.env.'
+                ) from exc
         channel = guild.get_channel(self.channel_id)
+        if channel is None:
+            # fetch_guild doesn't populate channel/member caches.
+            channel = await guild.fetch_channel(self.channel_id)
+        if not isinstance(channel, discord.TextChannel) or channel.guild.id != self.guild_id:
+            raise ValueError('CHANNEL_ID harus channel teks di server GUILD_ID yang diatur.')
         role = guild.get_role(self.role_id)
-        if not isinstance(channel, discord.TextChannel):
-            raise ValueError('CHANNEL_ID harus channel teks di server ini.')
         if role is None or role.is_default():
-            raise ValueError('ROLE_ID tidak valid atau menggunakan @everyone.')
+            raise ValueError(f'ROLE_ID {self.role_id} tidak ditemukan di server {self.guild_id}, atau menggunakan @everyone.')
         member = guild.me
         if member is None:
-            raise ValueError('Identitas bot belum tersedia di server.')
+            if self.user is None:
+                raise ValueError('Identitas bot belum tersedia; tunggu koneksi Discord siap.')
+            member = await guild.fetch_member(self.user.id)
         perms = channel.permissions_for(member)
         if not perms.view_channel or not perms.send_messages:
             raise ValueError('Bot perlu View Channel dan Send Messages pada channel tujuan.')
