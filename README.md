@@ -97,10 +97,11 @@ docker compose up -d --build
 
 Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; tambahkan `INDEX_31_TIMES`, `INDEX_32_TIMES`, dan `REMINDER_MINUTES` seperti contoh di atas. Jika tidak ditambahkan, default empat jadwal harian tetap digunakan.
 
-Versi ini mengganti penjadwalan manual dengan jadwal harian otomatis. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan lagi. `/trex` dan `/hapus` dihapus saat sinkronisasi perintah; jadwal manual lama di database tidak dijalankan. Data lama tidak dihapus.
+Versi ini mengganti penjadwalan manual dengan jadwal harian otomatis. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan lagi. `/trex` kini menampilkan spawn terdekat dan `/hapus` dihapus saat sinkronisasi perintah; jadwal manual lama di database tidak dijalankan. Data lama tidak dihapus.
 
 ## Perintah Discord
 
+- `/trex`: tampilkan satu jadwal spawn terdekat dari semua index, tanggal WIB, dan sisa waktunya. Respons publik tanpa tag role. Jika seluruh jadwal hari ini sudah lewat, otomatis memilih jadwal pertama besok. Pada waktu spawn yang persis sama, jadwal itu masih ditampilkan; sesudahnya memilih jadwal berikutnya. Sisa waktu dihitung saat perintah dipanggil, bukan countdown yang diperbarui otomatis.
 - `/jadwal`: lihat jadwal harian dan seluruh jam pengingat. Respons privat, tidak tag role.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
 
@@ -125,7 +126,7 @@ Setelah dependencies terpasang:
 python -m unittest discover -p 'test_*.py' -v
 ```
 
-Tes memeriksa 16 waktu trigger, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi konfigurasi, restart, retry, pengingat kedaluwarsa, dan pembatasan mention role. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
+Tes memeriksa 16 waktu trigger, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi konfigurasi, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, dan respons `/trex` lintas hari. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
 ## Referensi
 

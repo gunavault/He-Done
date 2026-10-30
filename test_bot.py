@@ -1,12 +1,12 @@
 import os
 import tempfile
 import unittest
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 from bot import TrexBot
-from schedule import daily_reminders
+from schedule import WIB, daily_reminders
 
 
 class DeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -55,8 +55,22 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.deliver_due(second.trigger + timedelta(minutes=2))
         self.assertEqual(self.bot.send_notice.await_count, 2)
 
+    async def test_trex_response_displays_nearest_without_ping(self):
+        interaction = AsyncMock()
+        command = self.bot.tree.get_command('trex')
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+            await command.callback(interaction)
+        interaction.response.send_message.assert_awaited_once()
+        args, kwargs = interaction.response.send_message.call_args
+        self.assertIn('Index: **3.1**', args[0])
+        self.assertIn('18:00 WIB', args[0])
+        self.assertIn('5 jam', args[0])
+        self.assertEqual(kwargs['allowed_mentions'].to_dict(), {'parse': []})
+        self.bot.send_notice.assert_not_awaited()
+
     async def test_commands_and_role_mention_scope(self):
-        self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'jadwal', 'tes'})
+        self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'trex', 'jadwal', 'tes'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()
         role = type('FakeRole', (), {'id': 789, 'mention': '<@&789>'})()

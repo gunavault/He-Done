@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -51,6 +51,14 @@ class TrexBot(discord.Client):
                 raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
             return True
 
+        @self.tree.command(name='trex', description='Lihat jadwal spawn T-Rex terdekat dan sisa waktunya')
+        @app_commands.guild_only()
+        @app_commands.check(check_server)
+        async def trex(interaction: discord.Interaction):
+            await interaction.response.send_message(
+                next_spawn_message(datetime.now(WIB), self.slots),
+                allowed_mentions=discord.AllowedMentions.none())
+
         @self.tree.command(name='jadwal', description='Lihat jam pengingat T-Rex harian dalam WIB')
         @app_commands.guild_only()
         @app_commands.check(check_server)
@@ -80,7 +88,7 @@ class TrexBot(discord.Client):
         self.tree.on_error = self.command_error
 
     async def setup_hook(self):
-        # Sync also removes the old /trex and /hapus manual commands in this guild.
+        # Sync replaces the old manual /trex with the read-only command and removes /hapus.
         self.tree.copy_global_to(guild=self.target_guild)
         await self.tree.sync(guild=self.target_guild)
         self.notify.start()

@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import re
+import math
 import sqlite3
 
 WIB = ZoneInfo('Asia/Jakarta')
@@ -67,6 +68,34 @@ def daily_reminders(day: date, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
         for offset in offsets:
             reminders.append(Reminder(index, start, offset))
     return sorted(reminders, key=lambda r: r.trigger)
+
+
+def next_spawn(now, slots=DEFAULT_SLOTS):
+    """Closest scheduled spawn at or after now, including tomorrow's first spawn."""
+    now = now.astimezone(WIB)
+    candidates = [event for delta in (0, 1)
+                  for event in daily_reminders(now.date() + timedelta(days=delta), slots, offsets=(0,))
+                  if event.start >= now]
+    if not candidates:
+        raise ValueError('Belum ada jadwal spawn yang dikonfigurasi.')
+    return min(candidates, key=lambda event: event.start)
+
+
+def next_spawn_message(now, slots=DEFAULT_SLOTS):
+    now = now.astimezone(WIB)
+    event = next_spawn(now, slots)
+    seconds = max(0, math.ceil((event.start - now).total_seconds()))
+    hours, rest = divmod(seconds, 3600)
+    minutes, seconds = divmod(rest, 60)
+    parts = [f'{value} {unit}' for value, unit in
+             ((hours, 'jam'), (minutes, 'menit'), (seconds, 'detik')) if value]
+    remaining = ' '.join(parts) if parts else 'Sekarang'
+    day = 'Hari ini' if event.start.date() == now.date() else 'Besok'
+    return (f'🦖 **Jadwal T-Rex terdekat**\n'
+            f'Index: **{event.index}**\n'
+            f'Spawn: **{event.start:%H:%M} WIB**\n'
+            f'Tanggal: {day}, {event.start:%d-%m-%Y}\n'
+            f'Sisa waktu: **{remaining}**')
 
 
 def due_reminders(now, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):

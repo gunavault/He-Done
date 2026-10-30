@@ -3,7 +3,7 @@ import unittest
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from schedule import (WIB, Store, daily_reminders, due_reminders, parse_time,
-                      parse_offsets, parse_times)
+                      parse_offsets, parse_times, next_spawn, next_spawn_message)
 
 
 class ScheduleTests(unittest.TestCase):
@@ -61,6 +61,31 @@ class ScheduleTests(unittest.TestCase):
         for value in ('', '5,5', '-1', 'abc', '1441'):
             with self.assertRaises(ValueError):
                 parse_offsets(value)
+
+    def test_next_spawn_between_schedules_and_exact_time(self):
+        for hour, minute, index, expected in (
+                (10, 0, '3.1', time(11, 20)), (11, 21, '3.2', time(12, 47)),
+                (13, 0, '3.1', time(18, 0)), (18, 1, '3.2', time(19, 27)),
+                (18, 0, '3.1', time(18, 0))):
+            event = next_spawn(datetime(2026, 10, 30, hour, minute, tzinfo=WIB))
+            self.assertEqual((event.index, event.start.time()), (index, expected))
+
+    def test_next_spawn_tomorrow_and_utc(self):
+        now = datetime(2026, 10, 30, 20, 0, tzinfo=WIB)
+        event = next_spawn(now)
+        self.assertEqual(event.start, datetime(2026, 10, 31, 11, 20, tzinfo=WIB))
+        self.assertIn('Besok, 31-10-2026', next_spawn_message(now))
+        self.assertEqual(next_spawn(now.astimezone(timezone.utc)), event)
+
+    def test_next_spawn_custom_schedule_and_countdown(self):
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        self.assertIn('5 jam', next_spawn_message(now))
+        custom = (('3.2', time(14, 15)),)
+        self.assertEqual(next_spawn(now, custom).index, '3.2')
+        self.assertIn('1 jam 15 menit', next_spawn_message(now, custom))
+        self.assertIn('Sekarang', next_spawn_message(datetime(2026, 10, 30, 18, 0, tzinfo=WIB)))
+        with self.assertRaises(ValueError):
+            next_spawn(now, slots=())
 
     def test_receipt_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
