@@ -56,35 +56,35 @@ class TrexBot(discord.Client):
                 raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
             return True
 
-        @self.tree.command(name='trex', description='Lihat spawn terdekat atau perbarui timer index dengan i dan w')
+        @self.tree.command(name='trex', description='Lihat spawn terdekat atau perbarui timer index dengan index dan waktu')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        @app_commands.choices(i=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
-        @app_commands.describe(i='Index yang timernya diperbarui', w='Waktu terakhir muncul, HH:MM WIB',
+        @app_commands.choices(index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
+        @app_commands.describe(index='Index yang timernya diperbarui', waktu='Waktu terakhir muncul, HH:MM WIB',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
-        async def trex(interaction: discord.Interaction, i: str | None = None,
-                       w: str | None = None, tanggal: str | None = None):
-            if i is None and w is None and tanggal is None:
+        async def trex(interaction: discord.Interaction, index: str | None = None,
+                       waktu: str | None = None, tanggal: str | None = None):
+            if index is None and waktu is None and tanggal is None:
                 await interaction.response.send_message(
                     next_spawn_message(datetime.now(WIB), self.slots, self.store.timers(self.guild_id)),
                     allowed_mentions=discord.AllowedMentions.none())
                 return
-            if i is None or w is None:
-                raise ValueError('Untuk update, isi keduanya: /trex i:3.1 w:11:20. Tanpa opsi untuk melihat jadwal.')
+            if index is None or waktu is None:
+                raise ValueError('Untuk update, isi keduanya: /trex index:3.1 waktu:11:20. Tanpa opsi untuk melihat jadwal.')
             if not interaction.permissions.manage_guild:
                 raise app_commands.MissingPermissions(['manage_guild'])
             await interaction.response.defer(ephemeral=True)
             # The same lock is held by the sender: no old timer can be queued after this update.
             async with self.lock:
                 now = datetime.now(WIB)
-                timer = calculate_timer(i, w, tanggal, now)
+                timer = calculate_timer(index, waktu, tanggal, now)
                 self.store.set_timer(self.guild_id, timer)
                 events = [event for delta in (0, 1)
                           for event in effective_reminders(now.date() + timedelta(days=delta),
                               self.slots, (0,), self.store.timers(self.guild_id))
-                          if event.index == i and (event.start >= now or event.end > now)]
+                          if event.index == index and (event.start >= now or event.end > now)]
                 event = min(events, key=lambda event: event.start)
-            lines = [f'✅ Timer index **{i}** diperbarui.',
+            lines = [f'✅ Timer index **{index}** diperbarui.',
                      f'Terakhir muncul: {timer.observed:%d-%m-%Y %H:%M} WIB',
                      f'Perkiraan spawn berikut: **{event.start:%d-%m-%Y %H:%M}–{event.end:%H:%M} WIB**']
             for offset in self.offsets:
@@ -118,7 +118,7 @@ class TrexBot(discord.Client):
             active_indices = {index for index, _ in self.slots} | overridden
             unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
             if unconfigured:
-                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /trex i:<index> w:<HH:MM>.')
+                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /trex index:<index> waktu:<HH:MM>.')
             await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
         @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')

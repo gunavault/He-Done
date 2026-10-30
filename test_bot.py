@@ -77,7 +77,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.permissions = SimpleNamespace(manage_guild=True)
         with patch('bot.datetime') as clock:
             clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            await self.bot.tree.get_command('trex').callback(interaction, i=index, w=waktu)
+            await self.bot.tree.get_command('trex').callback(interaction, index=index, waktu=waktu)
         return interaction
 
     async def test_update_replaces_reminders_and_survives_restart(self):
@@ -118,9 +118,9 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.permissions = SimpleNamespace(manage_guild=False)
         callback = self.bot.tree.get_command('trex').callback
         with self.assertRaises(ValueError):
-            await callback(interaction, i='3.1')
+            await callback(interaction, index='3.1')
         with self.assertRaises(app_commands.MissingPermissions):
-            await callback(interaction, i='3.1', w='11:20')
+            await callback(interaction, index='3.1', waktu='11:20')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
 
     async def test_invalid_time_preserves_existing_timer(self):
@@ -132,7 +132,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_indices_choices_updates_delivery_and_restart(self):
         command = self.bot.tree.get_command('trex')
-        choices = next(p for p in command.parameters if p.name == 'i').choices
+        choices = next(p for p in command.parameters if p.name == 'index').choices
         self.assertEqual([choice.value for choice in choices], ['3.1', '3.2', '4.1', '4.3'])
         await self.update_timer(index='4.3', waktu='08:20')
         await self.update_timer(index='4.1', waktu='08:30')

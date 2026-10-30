@@ -1,14 +1,14 @@
 # Bot notifikasi T-Rex Discord
 
-Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal default aktif saat bot dijalankan. Gunakan `/trex i:3.1 w:11:20` untuk mengganti timer index berdasarkan waktu T-Rex terakhir muncul. `/trex` tanpa opsi tetap menampilkan spawn terdekat.
+Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal default aktif saat bot dijalankan. Gunakan `/trex index:3.1 waktu:11:20` untuk mengganti timer index berdasarkan waktu T-Rex terakhir muncul. `/trex` tanpa opsi tetap menampilkan spawn terdekat.
 
 ## Index yang tersedia
 
-Index **3.1, 3.2, 4.1, dan 4.3** dapat dipilih melalui opsi `i` pada `/trex`. Index 4.1 dan 4.3 belum memiliki jam default: isi waktu terakhir muncul agar timer dan pengingatnya aktif. Rumus waktunya sama, yaitu 6 jam 40 menit–7 jam setelah kemunculan terakhir. Setiap index memiliki timer tersendiri yang tersimpan setelah restart dan berulang setiap hari sampai diperbarui.
+Index **3.1, 3.2, 4.1, dan 4.3** dapat dipilih melalui opsi `index` pada `/trex`. Index 4.1 dan 4.3 belum memiliki jam default: isi waktu terakhir muncul agar timer dan pengingatnya aktif. Rumus waktunya sama, yaitu 6 jam 40 menit–7 jam setelah kemunculan terakhir. Setiap index memiliki timer tersendiri yang tersimpan setelah restart dan berulang setiap hari sampai diperbarui.
 
 ```text
-/trex i:4.3 w:08:20
-/trex i:4.1 w:08:30
+/trex index:4.3 waktu:08:20
+/trex index:4.1 waktu:08:30
 ```
 
 Jam di atas hanya contoh; masukkan waktu aktual dalam WIB. `/jadwal` menampilkan semua slot harian aktif dan menandai index yang belum diisi. Tidak perlu mengubah `.env` atau membuat database baru untuk kedua index tambahan.
@@ -16,23 +16,23 @@ Jam di atas hanya contoh; masukkan waktu aktual dalam WIB. `/jadwal` menampilkan
 ## Update timer lewat Discord
 
 ```text
-/trex i:3.1 w:11:20
-/trex i:3.2 w:12:47
+/trex index:3.1 waktu:11:20
+/trex index:3.2 waktu:12:47
 /trex
 /jadwal
 ```
 
-Pada slash command Discord, pilih opsi `i` dan `w`; gunakan `:` seperti contoh, bukan mengetik `i=...` sebagai teks pesan biasa.
+Pada slash command Discord, pilih opsi `index` dan `waktu`; gunakan `:` seperti contoh, bukan mengetik `index=...` sebagai teks pesan biasa.
 
-- `w` adalah **waktu terakhir T-Rex muncul**, bukan jam pengingat atau jam spawn berikutnya.
-- Perkiraan spawn berikutnya adalah **w + 6 jam 40 menit sampai w + 7 jam**, dengan pengingat dihitung dari awal jendela.
-- `/trex i:3.1 w:11:20` menghasilkan jendela **18:00–18:20 WIB**, pengingat **17:30, 17:45, 17:55, 18:00**.
-- Update menjadi `w:11:30` mengganti jendela menjadi **18:10–18:30 WIB**, pengingat **17:40, 17:55, 18:05, 18:10**.
+- `waktu` adalah **waktu terakhir T-Rex muncul**, bukan jam pengingat atau jam spawn berikutnya.
+- Perkiraan spawn berikutnya adalah **waktu + 6 jam 40 menit sampai waktu + 7 jam**, dengan pengingat dihitung dari awal jendela.
+- `/trex index:3.1 waktu:11:20` menghasilkan jendela **18:00–18:20 WIB**, pengingat **17:30, 17:45, 17:55, 18:00**.
+- Update menjadi `waktu:11:30` mengganti jendela menjadi **18:10–18:30 WIB**, pengingat **17:40, 17:55, 18:05, 18:10**.
 - Update hanya mengganti index yang dipilih. Seluruh jadwal default/hasil update sebelumnya untuk index itu diganti dengan **satu jendela harian baru**. Index lainnya tidak berubah. Jadi sesudah update 3.1 ke `11:20`, slot tetap 3.1 pukul 11:20 tidak lagi mengirim notifikasi; jendela barunya adalah 18:00–18:20.
-- Jendela hasil update berulang setiap hari pada jam yang sama sampai diubah lagi. Bot tidak menghitung siklus berikutnya dari perkiraan secara otomatis; perbarui `w` saat melihat kemunculan aktual agar waktunya akurat.
+- Jendela hasil update berulang setiap hari pada jam yang sama sampai diubah lagi. Bot tidak menghitung siklus berikutnya dari perkiraan secara otomatis; perbarui `waktu` saat melihat kemunculan aktual agar waktunya akurat.
 - Timer tersimpan di SQLite, bertahan setelah restart, dan tidak ditimpa konfigurasi jam default di `.env`.
 - Update memerlukan **Manage Server**; `/trex` tanpa opsi dan `/jadwal` bisa digunakan anggota biasa. Konfirmasi update privat dan tidak tag role. Pengingat terjadwal tetap tag role di channel tujuan.
-- Tanggal default adalah hari ini WIB. Jika catatan berasal dari kemarin, isi `tanggal:2026-10-30`, misalnya `/trex i:3.1 w:23:20 tanggal:2026-10-30`. Hasilnya 31-10-2026 06:00–06:20 WIB. Waktu terakhir muncul yang masih di masa depan ditolak.
+- Tanggal default adalah hari ini WIB. Jika catatan berasal dari kemarin, isi `tanggal:2026-10-30`, misalnya `/trex index:3.1 waktu:23:20 tanggal:2026-10-30`. Hasilnya 31-10-2026 06:00–06:20 WIB. Waktu terakhir muncul yang masih di masa depan ditolak.
 - Bila input sudah menghasilkan jendela yang seluruhnya lewat hari ini, bot menampilkan jadwal berulang berikutnya besok. Pengingat yang sudah lewat tidak dikirim sekaligus; tetap mengikuti tenggang 60 detik pada bagian batasan di bawah.
 - `/trex` juga menampilkan jendela hasil update yang sedang berlangsung sampai waktu akhirnya, lalu memilih jadwal berikutnya.
 
@@ -193,7 +193,7 @@ Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.t
 ## Perintah Discord
 
 - `/trex`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika jadwal hari ini sudah lewat, memilih jadwal pertama besok. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
-- `/trex i:3.1 w:11:20`: perbarui timer satu index. `i` dan `w` wajib diisi bersama; `tanggal` opsional. Memerlukan Manage Server.
+- `/trex index:3.1 waktu:11:20`: perbarui timer satu index. `index` dan `waktu` wajib diisi bersama; `tanggal` opsional. Memerlukan Manage Server.
 - `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
 - `/tesvoice`: tes suara di voice channel yang dikonfigurasi, kemudian keluar. Memerlukan **Manage Server**.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
