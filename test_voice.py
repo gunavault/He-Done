@@ -154,6 +154,28 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
             await self.announcer.announce()
         self.voice_client.disconnect.assert_awaited_once()
 
+    async def test_volume_configuration_accepts_gain_and_rejects_invalid_values(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('VOICE_VOLUME', None)
+            self.assertEqual(VoiceAnnouncer(self.client, 123).volume, 3.0)
+        for value in ('0.1', '1', '2.5', '5'):
+            with patch.dict(os.environ, {'VOICE_VOLUME': value}):
+                self.assertEqual(VoiceAnnouncer(self.client, 123).volume, float(value))
+        for value in ('0', '-1', '5.1', 'nan', 'inf', 'abc'):
+            with patch.dict(os.environ, {'VOICE_VOLUME': value}):
+                with self.assertRaisesRegex(ValueError, 'VOICE_VOLUME'):
+                    VoiceAnnouncer(self.client, 123)
+
+    async def test_gain_and_limiter_apply_to_both_announcement_and_outro(self):
+        self.announcer.volume = 3.0
+        with patch('voice_alerts.discord.FFmpegOpusAudio') as source:
+            # Call the real method; the fixture mocks it for playback tests.
+            for path in (self.announcer.recording_for(), Path('assets/outro.mp3')):
+                VoiceAnnouncer.audio_source(self.announcer, path)
+                self.assertEqual(source.call_args.kwargs['options'],
+                                 '-filter:a volume=3,alimiter=limit=0.95:level=false')
+        self.assertEqual(source.call_count, 2)
+
     async def test_all_eight_recording_mappings_and_files(self):
         start = daily_reminders(date(2026, 10, 30))[0].start
         self.assertEqual(len(RECORDINGS), 8)

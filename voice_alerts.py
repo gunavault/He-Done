@@ -1,6 +1,7 @@
 """Optional voice announcements. No microphone recording or message reading."""
 import asyncio
 import logging
+import math
 import os
 from pathlib import Path
 
@@ -30,6 +31,12 @@ class VoiceAnnouncer:
         self.outro_path = Path(raw_outro) if raw_outro else None
         if self.outro_path is not None and not self.outro_path.is_absolute():
             self.outro_path = Path(__file__).resolve().parent / self.outro_path
+        try:
+            self.volume = float(os.getenv('VOICE_VOLUME', '3.0'))
+        except ValueError:
+            raise ValueError('VOICE_VOLUME harus angka antara 0.1 dan 5.0.') from None
+        if not math.isfinite(self.volume) or not 0.1 <= self.volume <= 5.0:
+            raise ValueError('VOICE_VOLUME harus angka antara 0.1 dan 5.0.')
         self.lock = asyncio.Lock()
 
     @property
@@ -71,7 +78,9 @@ class VoiceAnnouncer:
         import imageio_ffmpeg
         executable = os.getenv('FFMPEG_PATH', '').strip() or imageio_ffmpeg.get_ffmpeg_exe()
         # Opus is encoded by FFmpeg so a separate system libopus isn't required here.
-        return discord.FFmpegOpusAudio(str(path), executable=executable)
+        return discord.FFmpegOpusAudio(
+            str(path), executable=executable,
+            options=f'-filter:a volume={self.volume:g},alimiter=limit=0.95:level=false')
 
     async def play_track(self, voice_client, path):
         source = self.audio_source(path)

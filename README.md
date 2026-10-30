@@ -79,6 +79,7 @@ Semua rekaman disalin dari unggahan pengguna tanpa mengubah audio. Nama file din
 ```ini
 VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
 VOICE_AUDIO_DIR=assets/voice
+VOICE_VOLUME=3.0
 VOICE_OUTRO_PATH=assets/outro.mp3
 REMINDER_MINUTES=30,15
 ```
@@ -89,6 +90,12 @@ Ganti ID dengan ID voice channel biasa di server yang sama. `CHANNEL_ID` tetap m
 5. Restart, masuk ke voice channel tujuan, lalu jalankan **`/tesvoice`** dengan akun Manage Server. Log startup menampilkan `mode=recorded_mp3`.
 
 Default pengingat sekarang **H-30 dan H-15**. Jika `.env` atau Startup masih berisi `REMINDER_MINUTES=30,15,5,0`, ubah menjadi `30,15`; kode tidak menimpa environment aktif. Rekaman hanya tersedia untuk H-30/H-15. Jika offset lain sengaja dikonfigurasi, pesan teks tetap mengikuti offset itu, tetapi voice melewatinya.
+
+### Volume pengumuman
+
+`VOICE_VOLUME=3.0` adalah default baru untuk memperkuat rekaman, termasuk `test.mp3` dan MP3 penutup. `1.0` berarti amplitudo asli, `2.0` dua kali, dan `3.0` tiga kali. Nilai yang diterima 0.1–5.0; gunakan titik untuk desimal. FFmpeg memakai limiter puncak 0.95 agar penguatan tidak langsung memotong puncak sinyal. File MP3 asli tidak diubah.
+
+Setelah memperbarui kode, isi/ubah `VOICE_VOLUME` pada `.env` atau Startup Wispbyte, restart bot, lalu jalankan `/tesvoice`. Pengaturan volume pengguna di Discord tetap ikut menentukan keras suara yang terdengar.
 
 ### Audio, hosting, dan penanganan kegagalan
 
