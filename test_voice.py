@@ -8,8 +8,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import discord
-from schedule import daily_reminders
-from voice_alerts import VoiceAnnouncer, speech_for
+from schedule import daily_reminders, Reminder, SUPPORTED_INDICES
+from voice_alerts import VoiceAnnouncer, RECORDINGS
 
 
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
@@ -29,74 +29,66 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.voice_client.play.side_effect = lambda source, after: after(None)
         self.channel.connect = AsyncMock(return_value=self.voice_client)
         self.announcer = VoiceAnnouncer(self.client, 123)
-        self.paths = []
-
-        async def synthesize(text, path):
-            path.write_bytes(b'fake mp3')
-            self.paths.append(path)
-
-        self.announcer.synthesize = AsyncMock(side_effect=synthesize)
         self.source = MagicMock()
         self.announcer.audio_source = Mock(return_value=self.source)
 
     async def asyncTearDown(self):
         self.env.stop()
 
-    async def test_join_play_leave_and_remove_temporary_file(self):
-        self.assertTrue(await self.announcer.speak('Test announcement'))
+    async def test_join_play_leave_and_preserve_original_recording(self):
+        self.assertTrue(await self.announcer.announce())
         self.channel.connect.assert_awaited_once_with(timeout=15, reconnect=False, self_deaf=True, self_mute=False)
         self.voice_client.play.assert_called_once()
         self.voice_client.disconnect.assert_awaited_once_with(force=True)
         self.source.cleanup.assert_called_once()
-        self.assertFalse(self.paths[0].exists())
+        self.assertTrue(self.announcer.recording_for().exists())
 
     async def test_disabled_voice_does_not_connect(self):
         self.announcer.channel_id = 0
-        self.assertFalse(await self.announcer.speak('Test'))
+        self.assertFalse(await self.announcer.announce())
         self.channel.connect.assert_not_awaited()
 
-    async def test_stale_reminder_is_skipped_before_and_after_synthesis(self):
-        self.assertFalse(await self.announcer.speak('Test', is_current=lambda: False))
-        self.announcer.synthesize.assert_not_awaited()
-        self.assertFalse(await self.announcer.speak('Test', is_current=Mock(side_effect=[True, False])))
+    async def test_stale_reminder_is_skipped_before_and_after_destination_check(self):
+        self.assertFalse(await self.announcer.announce(is_current=lambda: False))
+        self.assertFalse(await self.announcer.announce(is_current=Mock(side_effect=[True, False])))
         self.channel.connect.assert_not_awaited()
-        self.assertFalse(self.paths[0].exists())
+        self.assertTrue(self.announcer.recording_for().exists())
 
     async def test_stale_reminder_after_connect_disconnects_without_speaking(self):
         current = Mock(side_effect=[True, True, False])
-        self.assertFalse(await self.announcer.speak('Test', is_current=current))
+        self.assertFalse(await self.announcer.announce(is_current=current))
         self.voice_client.play.assert_not_called()
         self.voice_client.disconnect.assert_awaited_once()
 
-    async def test_synthesis_failure_does_not_join(self):
-        self.announcer.synthesize.side_effect = RuntimeError('TTS offline')
-        with self.assertRaisesRegex(RuntimeError, 'TTS offline'):
-            await self.announcer.speak('Test')
+    async def test_missing_recording_does_not_join(self):
+        self.announcer.audio_dir = Path('/nonexistent/recordings')
+        with self.assertRaisesRegex(ValueError, 'Rekaman tidak ditemukan'):
+            await self.announcer.announce()
         self.channel.connect.assert_not_awaited()
 
     async def test_playback_failure_still_disconnects(self):
         self.voice_client.play.side_effect = lambda source, after: after(RuntimeError('Audio failed'))
         with self.assertRaisesRegex(RuntimeError, 'Audio failed'):
-            await self.announcer.speak('Test')
+            await self.announcer.announce()
         self.voice_client.disconnect.assert_awaited_once()
         self.source.cleanup.assert_called_once()
 
     async def test_cancellation_cleans_connection_and_audio(self):
         started = asyncio.Event()
         self.voice_client.play.side_effect = lambda source, after: started.set()
-        task = asyncio.create_task(self.announcer.speak('Test'))
+        task = asyncio.create_task(self.announcer.announce())
         await asyncio.wait_for(started.wait(), 1)
         task.cancel()
         with self.assertRaises(asyncio.CancelledError):
             await task
         self.voice_client.disconnect.assert_awaited_once()
         self.source.cleanup.assert_called_once()
-        self.assertFalse(self.paths[0].exists())
+        self.assertTrue(self.announcer.recording_for().exists())
 
     async def test_permissions_and_wrong_channel_are_rejected(self):
         self.channel.permissions_for.return_value.speak = False
         with self.assertRaisesRegex(ValueError, 'Connect, dan Speak'):
-            await self.announcer.speak('Test')
+            await self.announcer.announce()
         self.channel.connect.assert_not_awaited()
         self.channel.permissions_for.return_value.speak = True
         self.channel.guild = SimpleNamespace(id=456)
@@ -110,21 +102,21 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         existing = MagicMock()
         self.guild.voice_client = existing
         with self.assertRaisesRegex(ValueError, 'sesi voice lain'):
-            await self.announcer.speak('Test')
+            await self.announcer.announce()
         self.channel.connect.assert_not_awaited()
         existing.disconnect.assert_not_called()
 
     async def test_parallel_announcements_are_serialized(self):
-        await asyncio.gather(self.announcer.speak('First'), self.announcer.speak('Second'))
+        await asyncio.gather(self.announcer.announce(), self.announcer.announce())
         self.assertEqual(self.voice_client.disconnect.await_count, 2)
         self.assertEqual(self.voice_client.play.call_count, 2)
 
-    async def test_indonesian_default_voice_and_outro_configuration(self):
+    async def test_default_recordings_directory_and_outro_configuration(self):
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop('TTS_VOICE', None)
+            os.environ.pop('VOICE_AUDIO_DIR', None)
             os.environ.pop('VOICE_OUTRO_PATH', None)
             announcer = VoiceAnnouncer(self.client, 123)
-        self.assertEqual(announcer.voice, 'id-ID-ArdiNeural')
+        self.assertEqual(announcer.recording_for().name, 'test.mp3')
         self.assertEqual(announcer.outro_path.name, 'outro.mp3')
         self.assertTrue(announcer.outro_path.is_file())
 
@@ -133,9 +125,9 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.announcer.outro_path = outro
         speech_source, outro_source = MagicMock(), MagicMock()
         self.announcer.audio_source.side_effect = [speech_source, outro_source]
-        self.assertTrue(await self.announcer.speak('Pengumuman. RAWWRRRRR!'))
+        self.assertTrue(await self.announcer.announce())
         tracks = [call.args[0] for call in self.announcer.audio_source.call_args_list]
-        self.assertEqual(tracks[0].name, 'announcement.mp3')
+        self.assertEqual(tracks[0].name, 'test.mp3')
         self.assertEqual(tracks[1], outro)
         self.assertEqual([call.args[0] for call in self.voice_client.play.call_args_list],
                          [speech_source, outro_source])
@@ -147,9 +139,8 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
     async def test_missing_outro_has_clear_error_before_joining(self):
         self.announcer.outro_path = Path('/nonexistent/trex-outro.mp3')
         with self.assertRaisesRegex(ValueError, 'assets/outro.mp3'):
-            await self.announcer.speak('Tes')
+            await self.announcer.announce()
         self.channel.connect.assert_not_awaited()
-        self.announcer.synthesize.assert_not_awaited()
 
     async def test_outro_playback_error_still_disconnects(self):
         self.announcer.outro_path = Path(__file__).resolve().parent / 'assets' / 'outro.mp3'
@@ -160,14 +151,20 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
             after(None if count == 1 else RuntimeError('Outro failed'))
         self.voice_client.play.side_effect = play
         with self.assertRaisesRegex(RuntimeError, 'Outro failed'):
-            await self.announcer.speak('Tes. RAWWRRRRR!')
+            await self.announcer.announce()
         self.voice_client.disconnect.assert_awaited_once()
 
-    async def test_spoken_index_and_reminder(self):
-        reminder = daily_reminders(date(2026, 10, 30))[0]
-        self.assertIn('indeks tiga titik satu', speech_for(reminder))
-        self.assertIn('dalam 30 menit', speech_for(reminder))
-        self.assertTrue(speech_for(reminder).endswith('RAWWRRRRR!'))
-        reminder = daily_reminders(date(2026, 10, 30))[3]
-        self.assertIn('Jendela kemunculan', speech_for(reminder))
-        self.assertNotIn('dalam 0 menit', speech_for(reminder))
+    async def test_all_eight_recording_mappings_and_files(self):
+        start = daily_reminders(date(2026, 10, 30))[0].start
+        self.assertEqual(len(RECORDINGS), 8)
+        for index in SUPPORTED_INDICES:
+            for offset in (30, 15):
+                reminder = Reminder(index, start, offset)
+                path = self.announcer.recording_for(reminder)
+                self.assertEqual(path.name, f'{index.replace(".", "_")}_h{offset}.mp3')
+                self.assertTrue(path.is_file())
+        for offset in (5, 0):
+            reminder = Reminder('3.1', start, offset)
+            self.assertFalse(self.announcer.supports(reminder))
+            with self.assertRaises(ValueError):
+                self.announcer.recording_for(reminder)

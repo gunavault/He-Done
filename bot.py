@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES
 
-from voice_alerts import VoiceAnnouncer, speech_for, TEST_SPEECH
+from voice_alerts import VoiceAnnouncer
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -36,7 +36,7 @@ class TrexBot(discord.Client):
                 ('3.1', 'INDEX_31_TIMES', '11:20,18:00'),
                 ('3.2', 'INDEX_32_TIMES', '12:47,19:27'))
              for at in parse_times(os.getenv(env_name, default))], key=lambda slot: slot[1]))
-        self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15,5,0'))
+        self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15'))
         path = Path(os.getenv('DB_PATH', 'data/trex.sqlite3'))
         if not path.is_absolute():
             path = ROOT / path
@@ -141,7 +141,7 @@ class TrexBot(discord.Client):
             if not self.voice.enabled:
                 raise ValueError('Voice belum aktif. Isi VOICE_CHANNEL_ID lalu restart bot.')
             try:
-                await self.voice.speak(TEST_SPEECH)
+                await self.voice.announce()
             except Exception as exc:
                 log.warning('Tes voice gagal: %s', exc)
                 await interaction.followup.send(
@@ -164,8 +164,8 @@ class TrexBot(discord.Client):
                  self.user, self.user.id if self.user else None, self.guild_id,
                  self.channel_id, self.role_id, self.intents.guilds,
                  [(guild.id, guild.name) for guild in self.guilds], self.offsets)
-        log.info('Voice: enabled=%s VOICE_CHANNEL_ID=%s TTS_VOICE=%s',
-                 self.voice.enabled, self.voice.channel_id, self.voice.voice)
+        log.info('Voice: enabled=%s VOICE_CHANNEL_ID=%s mode=recorded_mp3 VOICE_AUDIO_DIR=%s',
+                 self.voice.enabled, self.voice.channel_id, self.voice.audio_dir)
         try:
             channel, role = await self.destination()
         except (discord.HTTPException, ValueError) as exc:
@@ -240,7 +240,7 @@ class TrexBot(discord.Client):
 
     def queue_voice(self, reminder, key, now):
         voice_key = 'voice|' + key
-        if (not self.voice.enabled or voice_key in self._voice_tasks
+        if (not self.voice.enabled or not self.voice.supports(reminder) or voice_key in self._voice_tasks
                 or self.store.was_sent(voice_key)):
             return
         # Retry voice independently; never resend a successful text message for a voice failure.
@@ -253,7 +253,7 @@ class TrexBot(discord.Client):
 
     async def deliver_voice(self, reminder, voice_key):
         try:
-            spoken = await self.voice.speak(speech_for(reminder),
+            spoken = await self.voice.announce(reminder,
                                            is_current=lambda: self.voice_is_current(reminder))
             if spoken:
                 self.store.mark_sent(voice_key, datetime.now(WIB))

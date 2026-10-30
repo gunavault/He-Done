@@ -176,39 +176,39 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_voice_receipt_prevents_duplicates_independently_of_text(self):
         self.bot.voice.channel_id = 888
-        self.bot.voice.speak = AsyncMock(return_value=True)
+        self.bot.voice.announce = AsyncMock(return_value=True)
         now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
         await self.bot.deliver_due(now)
         await self.flush_voice()
         await self.bot.deliver_due(now + timedelta(seconds=5))
         await self.flush_voice()
         self.bot.send_notice.assert_awaited_once()
-        self.bot.voice.speak.assert_awaited_once()
-        self.assertIn('dalam 30 menit', self.bot.voice.speak.call_args.args[0])
+        self.bot.voice.announce.assert_awaited_once()
+        self.assertEqual(self.bot.voice.announce.call_args.args[0].minutes_before, 30)
 
     async def test_voice_failure_retries_without_resending_text(self):
         self.bot.voice.channel_id = 888
-        self.bot.voice.speak = AsyncMock(side_effect=RuntimeError('TTS offline'))
+        self.bot.voice.announce = AsyncMock(side_effect=RuntimeError('TTS offline'))
         now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
         await self.bot.deliver_due(now)
         await self.flush_voice()
         await self.bot.deliver_due(now + timedelta(seconds=5))
         await self.flush_voice()
-        self.assertEqual(self.bot.voice.speak.await_count, 1)
-        self.bot.voice.speak.side_effect = None
-        self.bot.voice.speak.return_value = True
+        self.assertEqual(self.bot.voice.announce.await_count, 1)
+        self.bot.voice.announce.side_effect = None
+        self.bot.voice.announce.return_value = True
         await self.bot.deliver_due(now + timedelta(seconds=15))
         await self.flush_voice()
-        self.assertEqual(self.bot.voice.speak.await_count, 2)
+        self.assertEqual(self.bot.voice.announce.await_count, 2)
         self.bot.send_notice.assert_awaited_once()
 
     async def test_voice_can_succeed_even_when_text_fails(self):
         self.bot.voice.channel_id = 888
-        self.bot.voice.speak = AsyncMock(return_value=True)
+        self.bot.voice.announce = AsyncMock(return_value=True)
         self.bot.send_notice.side_effect = ValueError('Text permission denied')
         await self.bot.deliver_due(datetime(2026, 10, 30, 10, 50, tzinfo=WIB))
         await self.flush_voice()
-        self.bot.voice.speak.assert_awaited_once()
+        self.bot.voice.announce.assert_awaited_once()
 
     async def test_voice_job_is_invalidated_by_timer_update(self):
         event = daily_reminders(date(2026, 10, 30))[0]
@@ -226,13 +226,20 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, 'VOICE_CHANNEL_ID'):
             await command.callback(AsyncMock())
 
-    async def test_voice_test_uses_indonesian_text_and_roar(self):
+    async def test_voice_test_selects_test_recording(self):
         self.bot.voice.channel_id = 888
-        self.bot.voice.speak = AsyncMock(return_value=True)
+        self.bot.voice.announce = AsyncMock(return_value=True)
         await self.bot.tree.get_command('tesvoice').callback(AsyncMock())
-        speech = self.bot.voice.speak.call_args.args[0]
-        self.assertIn('Ini adalah tes notifikasi T-Rex', speech)
-        self.assertTrue(speech.endswith('RAWWRRRRR!'))
+        self.bot.voice.announce.assert_awaited_once_with()
+        self.assertEqual(self.bot.voice.recording_for().name, 'test.mp3')
+
+    async def test_unsupported_offsets_do_not_queue_voice(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.announce = AsyncMock(return_value=True)
+        await self.bot.deliver_due(datetime(2026, 10, 30, 11, 15, tzinfo=WIB))
+        await self.flush_voice()
+        self.bot.send_notice.assert_awaited_once()
+        self.bot.voice.announce.assert_not_awaited()
 
     def fake_destination(self, *, channel_cached=True, member_cached=True):
         role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)

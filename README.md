@@ -45,7 +45,7 @@ Pada slash command Discord, pilih opsi `i` dan `w`; gunakan `:` seperti contoh, 
 | 3.1 | 17:30 | 17:45 | 17:55 | 18:00 |
 | 3.2 | 18:57 | 19:12 | 19:22 | 19:27 |
 
-**Semua jam di atas WIB.** Sebelum ada update, default mengirim 16 pesan per hari, masing-masing dengan tag role. Setelah kedua index diperbarui, ada satu jendela per index dengan empat notifikasi (8 pesan per hari). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
+**Semua jam di atas WIB.** Tabel juga menampilkan referensi H-5 dan saat spawn; konfigurasi default sekarang hanya H-30/H-15. Untuk empat slot default ada 8 pesan per hari. Setelah kedua index awal diperbarui menjadi satu jendela per index, ada 4 pesan per hari (belum termasuk index tambahan yang diaktifkan). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
 
 Contoh pesan pada 10:50 WIB:
 
@@ -56,50 +56,51 @@ Jadwal spawn T-Rex: 11:20 WIB.
 Tanggal spawn: 31-10-2026
 ```
 
-## Pengumuman suara di voice channel
+## Pengumuman suara dari MP3
 
-Fitur opsional: pada setiap waktu pengingat aktif, bot masuk ke satu voice channel, membacakan pengumuman dengan suara pria Indonesia **Ardi**, mengucapkan **RAWWRRRRR!**, memutar MP3 penutup, lalu keluar. Contoh H-30:
+Bot kini memakai **9 rekaman MP3 dari pengguna**, tanpa sintesis TTS online. Pada H-30 dan H-15 bot masuk ke voice channel, memutar rekaman sesuai index, melanjutkan MP3 penutup `assets/outro.mp3`, lalu keluar. `/tesvoice` memakai `test.mp3` dan MP3 penutup yang sama. Isi ucapan/RAWWRRRRR mengikuti rekaman asli; bot tidak menambahkan ucapan TTS lagi.
 
-> Perhatian! T-Rex di indeks tiga titik satu diperkirakan muncul dalam 30 menit. Bersiaplah! RAWWRRRRR!
+| Index | H-30 | H-15 |
+| --- | --- | --- |
+| 3.1 | `assets/voice/3_1_h30.mp3` | `assets/voice/3_1_h15.mp3` |
+| 3.2 | `assets/voice/3_2_h30.mp3` | `assets/voice/3_2_h15.mp3` |
+| 4.1 | `assets/voice/4_1_h30.mp3` | `assets/voice/4_1_h15.mp3` |
+| 4.3 | `assets/voice/4_3_h30.mp3` | `assets/voice/4_3_h15.mp3` |
+| Tes | `assets/voice/test.mp3` | — |
 
-Saat jendela spawn dimulai, bot mengatakan bahwa jendela spawn sedang dimulai. Mendukung semua index, termasuk 4.1 dan 4.3.
+Semua rekaman disalin dari unggahan pengguna tanpa mengubah audio. Nama file dinormalisasi agar pemilihannya konsisten.
 
-1. Perbarui seluruh file kode, termasuk **`voice_alerts.py`**, `requirements.txt`, dan folder **`assets/`** berisi `outro.mp3`. Untuk instalasi Git, jalankan `git pull origin main`.
-2. Pasang dependencies terbaru: `python -m pip install -r requirements.txt`. Pada Wispbyte, startup memasangnya dari `REQUIREMENTS_FILE=requirements.txt` sebelum bot berjalan.
-3. Di Discord, klik kanan **voice channel biasa** tujuan → Copy Channel ID. Jangan gunakan ID channel teks/forum/Stage.
-4. Tambahkan konfigurasi pada `.env` atau variabel environment aktif di panel:
+### Aktifkan di Wispbyte
+
+1. Perbarui seluruh kode, `requirements.txt`, dan **folder `assets/` lengkap**, termasuk `assets/voice/` serta `assets/outro.mp3`. Instalasi Git dapat memakai `git pull origin main` atau `AUTO_UPDATE=1` sebelum restart.
+2. Pastikan dependencies terpasang dari `requirements.txt` dan `PY_FILE=bot.py`.
+3. Isi `.env` atau variabel Startup aktif:
 
 ```ini
 VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
-TTS_VOICE=id-ID-ArdiNeural
+VOICE_AUDIO_DIR=assets/voice
 VOICE_OUTRO_PATH=assets/outro.mp3
-REMINDER_MINUTES=30,15,5,0
+REMINDER_MINUTES=30,15
 ```
 
-Ganti `ISI_ID_VOICE_CHANNEL` dengan angka ID asli. `CHANNEL_ID` tetap berisi ID channel **teks** yang dipakai untuk tag role; `VOICE_CHANNEL_ID` adalah tujuan **suara** yang terpisah. Kosongkan `VOICE_CHANNEL_ID` untuk menonaktifkan suara.
+Ganti ID dengan ID voice channel biasa di server yang sama. `CHANNEL_ID` tetap memakai ID channel **teks** untuk pesan bertag role. Kosongkan `VOICE_CHANNEL_ID` untuk mematikan suara. `TTS_VOICE` tidak lagi digunakan dan boleh dihapus.
 
-Jika `.env` atau variabel Startup masih berisi `TTS_VOICE=en-US-GuyNeural`, ubah menjadi `id-ID-ArdiNeural`; konfigurasi lama tidak ditimpa otomatis oleh kode.
+4. Beri bot izin **View Channel, Connect, dan Speak**. Bot harus tidak di-server-mute. Tidak perlu Administrator.
+5. Restart, masuk ke voice channel tujuan, lalu jalankan **`/tesvoice`** dengan akun Manage Server. Log startup menampilkan `mode=recorded_mp3`.
 
-`assets/outro.mp3` adalah MP3 penutup dari pengguna dan disertakan dalam repositori. Urutannya: **pengumuman bahasa Indonesia → ucapan RAWWRRRRR! → MP3 asli → keluar dari voice channel**. RAWWRRRRR dibacakan oleh TTS; bukan efek raungan dinosaurus terpisah. `/tesvoice` memakai urutan yang sama. MP3 hanya diputar, tidak dipakai melatih atau meniru suara untuk TTS.
+Default pengingat sekarang **H-30 dan H-15**. Jika `.env` atau Startup masih berisi `REMINDER_MINUTES=30,15,5,0`, ubah menjadi `30,15`; kode tidak menimpa environment aktif. Rekaman hanya tersedia untuk H-30/H-15. Jika offset lain sengaja dikonfigurasi, pesan teks tetap mengikuti offset itu, tetapi voice melewatinya.
 
-Path relatif `VOICE_OUTRO_PATH` dihitung dari folder proyek, bukan working directory terminal. Kosongkan `VOICE_OUTRO_PATH=` jika tidak ingin MP3 penutup. Jika file yang dikonfigurasi hilang, fitur suara mencatat error yang jelas; pesan teks tetap berjalan. Untuk Wispbyte yang memakai upload manual, pastikan file berada di `/home/container/assets/outro.mp3`.
+### Audio, hosting, dan penanganan kegagalan
 
-5. Berikan bot izin **View Channel**, **Connect**, dan **Speak** pada voice channel tersebut. Bot juga harus tidak di-server-mute. Tidak perlu Administrator.
-6. Restart bot, lalu jalankan **`/tesvoice`** melalui akun dengan Manage Server. Masuk ke voice channel tujuan untuk mendengarnya.
-
-Log startup menampilkan `Voice: enabled=True VOICE_CHANNEL_ID=...`. Jika pengingat aktif hanya `30,15`, suara juga hanya dipicu pada H-30 dan H-15; untuk H-5 dan saat spawn, ubah `REMINDER_MINUTES` seperti contoh di atas. Mendengar suara tidak mengirim push notification ke pengguna yang tidak berada di voice channel.
-
-### Dependencies dan batasan hosting
-
-- `discord.py[voice]` memasang dukungan koneksi voice termasuk PyNaCl/DAVE. Audio dikonversi menjadi Opus melalui FFmpeg.
-- `imageio-ffmpeg` menyediakan binary FFmpeg pada wheel platform yang didukung, sehingga umumnya tidak perlu menjalankan apt/sudo di Wispbyte. Jika platform tidak didukung atau binary tidak dapat dijalankan, sediakan FFmpeg dari hosting dan isi `FFMPEG_PATH=/path/to/ffmpeg`.
-- Sintesis memakai **edge-tts**, yang mengakses layanan TTS online Microsoft Edge. Teks pengumuman dikirim ke layanan tersebut; bot tidak merekam mikrofon atau percakapan anggota. Ini integrasi komunitas yang bergantung pada layanan eksternal, sehingga sintesis bisa gagal jika akses diblokir atau layanan berubah.
-- Hosting harus mengizinkan koneksi TTS HTTPS/WebSocket dan koneksi voice Discord termasuk UDP. Jika `/tesvoice` gagal, periksa log Console; jika ada timeout koneksi voice, konfirmasikan dukungan UDP dengan penyedia hosting.
-- Pengumuman suara diantrekan agar tidak saling bertabrakan. Antrean yang sudah lewat tenggang 60 detik atau dibatalkan oleh update timer dilewati sebelum pemutaran.
-- Pengiriman suara berjalan terpisah dari scheduler teks. Kegagalan audio tidak mengirim ulang pesan teks yang sudah berhasil. Suara dicoba ulang dengan jeda 15 detik selama pengingat masih dalam tenggang 60 detik.
-- Status suara tersimpan terpisah di database agar restart normal tidak membacakan ulang pengumuman yang sudah selesai. Jika bot mati tepat setelah suara selesai tetapi sebelum status tersimpan, pengulangan masih mungkin terjadi.
-- Bot keluar setelah pengumuman dan MP3 penutup selesai, atau jika pemutaran gagal. Jika bot sedang memiliki sesi voice lain, fitur ini tidak memindahkan atau memutus sesi itu.
-- `/tesvoice` langsung membacakan pesan uji di channel yang dikonfigurasi. Perintah update timer dan `/trex` biasa tidak mengeluarkan suara langsung.
+- Semua path relatif dihitung dari folder proyek. Upload manual Wispbyte harus menempatkan rekaman di `/home/container/assets/voice/` dan penutup di `/home/container/assets/outro.mp3`.
+- Jika rekaman atau MP3 penutup hilang, bot mencatat nama/path file yang perlu diperbarui dan tidak masuk ke voice channel. Pesan teks tetap berjalan.
+- Kosongkan `VOICE_OUTRO_PATH=` untuk menonaktifkan penutup; rekaman pengingat tetap diputar.
+- `discord.py[voice]` menyediakan dukungan voice termasuk PyNaCl/DAVE; `imageio-ffmpeg` menyediakan FFmpeg pada platform wheel yang didukung. Jika binary tidak cocok, sediakan FFmpeg hosting dan isi `FFMPEG_PATH`.
+- Bot tidak lagi memerlukan Edge TTS atau koneksi layanan sintesis. Hosting tetap perlu mendukung koneksi voice Discord termasuk UDP.
+- Pengumuman diantrekan agar tidak tumpang tindih. Job yang sudah lewat tenggang 60 detik atau diganti lewat update timer dilewati sebelum pemutaran.
+- Kegagalan voice tidak mengirim ulang pesan teks yang sudah berhasil. Voice dicoba ulang dengan jeda 15 detik selama masih dalam tenggang.
+- Status pengiriman teks/voice tersimpan terpisah agar restart normal tidak mengulang pengumuman yang sudah selesai. Jika proses mati sesaat sebelum status tersimpan, pengulangan masih mungkin.
+- Bot keluar sesudah seluruh audio selesai atau saat gagal; sesi voice lain tidak dipindah/diputus. Bot tidak merekam mikrofon/percakapan.
 
 ## 1. Buat dan undang bot
 
@@ -121,14 +122,14 @@ CHANNEL_ID=234567890123456789
 ROLE_ID=345678901234567890
 INDEX_31_TIMES=11:20,18:00
 INDEX_32_TIMES=12:47,19:27
-REMINDER_MINUTES=30,15,5,0
+REMINDER_MINUTES=30,15
 DB_PATH=data/trex.sqlite3
 ```
 
 Angka ID di atas hanya contoh. Gunakan ID asli; role dan channel harus berada di server yang sama. Jangan menggunakan ID @everyone.
 
 - `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Dipakai hanya untuk index yang belum diperbarui lewat `/trex`.
-- `REMINDER_MINUTES`: menit sebelum spawn. `30,15,5,0` berarti H-30, H-15, H-5, dan saat spawn.
+- `REMINDER_MINUTES`: menit sebelum awal jendela spawn. Default `30,15` berarti H-30 dan H-15.
 - Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (3 pesan per jendela spawn).
 - Restart bot setelah mengubah konfigurasi. Pada Docker Compose jalankan ulang `docker compose up -d --build` agar environment baru diterapkan.
 

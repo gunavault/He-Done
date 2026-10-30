@@ -2,28 +2,16 @@
 import asyncio
 import logging
 import os
-import tempfile
 from pathlib import Path
 
 import discord
+from schedule import SUPPORTED_INDICES
 
 log = logging.getLogger('trex.voice')
 
 
-ROAR = 'RAWWRRRRR!'
-TEST_SPEECH = f'Ini adalah tes notifikasi T-Rex. Pengumuman suara sudah siap. Bersiaplah! {ROAR}'
-
-
-def speech_for(reminder):
-    words = {'0': 'nol', '1': 'satu', '2': 'dua', '3': 'tiga', '4': 'empat',
-             '5': 'lima', '6': 'enam', '7': 'tujuh', '8': 'delapan', '9': 'sembilan', '.': 'titik'}
-    index = ' '.join(words.get(char, char) for char in reminder.index)
-    if reminder.minutes_before:
-        message = (f'Perhatian! T-Rex di indeks {index} diperkirakan muncul dalam '
-                   f'{reminder.minutes_before} menit. Bersiaplah!')
-    else:
-        message = f'Perhatian! Jendela kemunculan T-Rex di indeks {index} dimulai sekarang. Bersiaplah!'
-    return f'{message} {ROAR}'
+RECORDINGS = {(index, minutes): f'{index.replace(".", "_")}_h{minutes}.mp3'
+              for index in SUPPORTED_INDICES for minutes in (30, 15)}
 
 
 class VoiceAnnouncer:
@@ -34,7 +22,10 @@ class VoiceAnnouncer:
         self.channel_id = int(raw) if raw else 0
         if self.channel_id < 0:
             raise ValueError('VOICE_CHANNEL_ID harus ID voice channel, atau kosong untuk menonaktifkan.')
-        self.voice = os.getenv('TTS_VOICE', 'id-ID-ArdiNeural').strip() or 'id-ID-ArdiNeural'
+        raw_dir = os.getenv('VOICE_AUDIO_DIR', 'assets/voice').strip() or 'assets/voice'
+        self.audio_dir = Path(raw_dir)
+        if not self.audio_dir.is_absolute():
+            self.audio_dir = Path(__file__).resolve().parent / self.audio_dir
         raw_outro = os.getenv('VOICE_OUTRO_PATH', 'assets/outro.mp3').strip()
         self.outro_path = Path(raw_outro) if raw_outro else None
         if self.outro_path is not None and not self.outro_path.is_absolute():
@@ -66,10 +57,15 @@ class VoiceAnnouncer:
             raise ValueError('Bot perlu View Channel, Connect, dan Speak pada voice channel tujuan.')
         return channel
 
-    async def synthesize(self, text, path):
-        # Loaded only when enabled; text notifications still work without voice packages.
-        import edge_tts
-        await edge_tts.Communicate(text, self.voice).save(str(path))
+    def supports(self, reminder):
+        return (reminder.index, reminder.minutes_before) in RECORDINGS
+
+    def recording_for(self, reminder=None):
+        if reminder is None:
+            return self.audio_dir / 'test.mp3'
+        if not self.supports(reminder):
+            raise ValueError('Rekaman voice tersedia hanya untuk index 3.1, 3.2, 4.1, 4.3 pada H-30/H-15.')
+        return self.audio_dir / RECORDINGS[(reminder.index, reminder.minutes_before)]
 
     def audio_source(self, path):
         import imageio_ffmpeg
@@ -99,7 +95,7 @@ class VoiceAnnouncer:
             voice_client.stop()
             source.cleanup()
 
-    async def speak(self, text, is_current=lambda: True):
+    async def announce(self, reminder=None, is_current=lambda: True):
         if not self.enabled:
             return False
         async with self.lock:
@@ -108,29 +104,26 @@ class VoiceAnnouncer:
             voice_client = None
             try:
                 async with asyncio.timeout(60):
+                    path = self.recording_for(reminder)
+                    if not path.is_file():
+                        raise ValueError(f'Rekaman tidak ditemukan: {path}. Perbarui folder assets/voice.')
                     if self.outro_path is not None and not self.outro_path.is_file():
                         raise ValueError('Audio penutup tidak ditemukan. Perbarui assets/outro.mp3 '
                                          'atau periksa VOICE_OUTRO_PATH.')
                     channel = await self.destination()
-                    # Don't move/disconnect a session belonging to a different operation.
                     if channel.guild.voice_client is not None:
                         raise ValueError('Bot sedang memiliki sesi voice lain; coba lagi setelah selesai.')
-                    with tempfile.TemporaryDirectory(prefix='trex-voice-') as tmp:
-                        path = Path(tmp) / 'announcement.mp3'
-                        await asyncio.wait_for(self.synthesize(text, path), timeout=20)
-                        if not is_current():
-                            return False
-                        voice_client = await channel.connect(timeout=15, reconnect=False,
-                                                             self_deaf=True, self_mute=False)
-                        # Recheck after the network handshake: an index may have been updated.
-                        if not is_current():
-                            return False
-                        # Stay in the same connection until speech + roar + original MP3 finish.
-                        await self.play_track(voice_client, path)
-                        if self.outro_path is not None:
-                            await self.play_track(voice_client, self.outro_path)
-                        log.info('Pengumuman voice selesai: channel_id=%s', self.channel_id)
-                        return True
+                    if not is_current():
+                        return False
+                    voice_client = await channel.connect(timeout=15, reconnect=False,
+                                                         self_deaf=True, self_mute=False)
+                    if not is_current():
+                        return False
+                    await self.play_track(voice_client, path)
+                    if self.outro_path is not None:
+                        await self.play_track(voice_client, self.outro_path)
+                    log.info('Rekaman voice selesai: channel_id=%s file=%s', self.channel_id, path.name)
+                    return True
             finally:
                 if voice_client is not None:
                     try:
