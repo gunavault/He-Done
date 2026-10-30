@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -54,7 +54,7 @@ class TrexBot(discord.Client):
         @self.tree.command(name='trex', description='Lihat spawn terdekat atau perbarui timer index dengan i dan w')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        @app_commands.choices(i=[app_commands.Choice(name=x, value=x) for x in ('3.1', '3.2')])
+        @app_commands.choices(i=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
         @app_commands.describe(i='Index yang timernya diperbarui', w='Waktu terakhir muncul, HH:MM WIB',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
         async def trex(interaction: discord.Interaction, i: str | None = None,
@@ -101,13 +101,19 @@ class TrexBot(discord.Client):
                       for event in effective_reminders(now.date() + timedelta(days=delta),
                           self.slots, (0,), timers) if event.start >= now or (event.end and event.end > now)]
             lines = ['🦖 **Jadwal berikutnya — WIB, berulang setiap hari**']
-            for event in sorted(events, key=lambda event: event.start)[:len(self.slots)]:
+            overridden = {timer.index for timer in timers}
+            daily_count = sum(index not in overridden for index, _ in self.slots) + len(timers)
+            for event in sorted(events, key=lambda event: event.start)[:daily_count]:
                 window = f'{event.start:%H:%M}' + (f'–{event.end:%H:%M}' if event.end else '')
                 lines.append(f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**')
                 for offset in self.offsets:
                     at = event.start - timedelta(minutes=offset)
                     label = f'H-{offset}' if offset else 'Spawn dimulai'
                     lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
+            active_indices = {index for index, _ in self.slots} | overridden
+            unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
+            if unconfigured:
+                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /trex i:<index> w:<HH:MM>.')
             await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
         @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')

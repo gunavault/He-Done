@@ -130,6 +130,44 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.update_timer(waktu='bad')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), previous)
 
+    async def test_new_indices_choices_updates_delivery_and_restart(self):
+        command = self.bot.tree.get_command('trex')
+        choices = next(p for p in command.parameters if p.name == 'i').choices
+        self.assertEqual([choice.value for choice in choices], ['3.1', '3.2', '4.1', '4.3'])
+        await self.update_timer(index='4.3', waktu='08:20')
+        await self.update_timer(index='4.1', waktu='08:30')
+        timers = {timer.index: timer for timer in self.bot.store.timers(self.bot.guild_id)}
+        self.assertEqual(timers['4.3'].start.strftime('%H:%M'), '15:00')
+        self.assertEqual(timers['4.1'].start.strftime('%H:%M'), '15:10')
+        await self.bot.deliver_due(datetime(2026, 10, 30, 14, 30, tzinfo=WIB))
+        self.assertIn('Index 4.3', self.bot.send_notice.call_args.args[0])
+        await self.bot.deliver_due(datetime(2026, 10, 30, 14, 40, tzinfo=WIB))
+        self.assertIn('Index 4.1', self.bot.send_notice.call_args.args[0])
+        self.assertEqual(self.bot.send_notice.await_count, 2)
+        await self.bot.close()
+        self.bot = TrexBot()
+        self.bot.send_notice = AsyncMock()
+        self.assertEqual(len(self.bot.store.timers(self.bot.guild_id)), 2)
+        await self.bot.deliver_due(datetime(2026, 10, 31, 14, 30, tzinfo=WIB))
+        self.assertIn('Index 4.3', self.bot.send_notice.call_args.args[0])
+
+    async def test_jadwal_includes_new_indices_without_truncation(self):
+        interaction = AsyncMock()
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+            await self.bot.tree.get_command('jadwal').callback(interaction)
+        self.assertIn('Index belum diisi: 4.1, 4.3', interaction.response.send_message.call_args.args[0])
+        await self.update_timer(index='4.3', waktu='08:20')
+        await self.update_timer(index='4.1', waktu='08:30')
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = datetime(2026, 10, 30, 20, 0, tzinfo=WIB)
+            await self.bot.tree.get_command('jadwal').callback(interaction)
+        message = interaction.response.send_message.call_args.args[0]
+        self.assertNotIn('Index belum diisi', message)
+        self.assertEqual(message.count('**Index'), 6)
+        for index in ('3.1', '3.2', '4.1', '4.3'):
+            self.assertIn(f'**Index {index}', message)
+
     def fake_destination(self, *, channel_cached=True, member_cached=True):
         role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)
         member = SimpleNamespace(id=999)

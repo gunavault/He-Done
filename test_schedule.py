@@ -3,7 +3,7 @@ import unittest
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from schedule import (WIB, Store, daily_reminders, due_reminders, parse_time,
-                      parse_offsets, parse_times, next_spawn, next_spawn_message, calculate_timer, effective_reminders)
+                      parse_offsets, parse_times, next_spawn, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES)
 
 
 class ScheduleTests(unittest.TestCase):
@@ -101,6 +101,20 @@ class ScheduleTests(unittest.TestCase):
         self.assertEqual(len(events), 4)
         original_other = [e for e in daily_reminders(now.date()) if e.index == '3.2']
         self.assertEqual([e for e in effective_reminders(now.date(), timers=(timer,)) if e.index == '3.2'], original_other)
+
+    def test_new_indices_are_inactive_until_configured_and_have_separate_timers(self):
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        self.assertEqual(SUPPORTED_INDICES, ('3.1', '3.2', '4.1', '4.3'))
+        defaults = effective_reminders(now.date())
+        self.assertFalse([e for e in defaults if e.index in ('4.1', '4.3')])
+        timers = (calculate_timer('4.3', '08:20', now=now),
+                  calculate_timer('4.1', '08:30', now=now))
+        events = effective_reminders(now.date(), timers=timers)
+        self.assertEqual([e for e in events if e.index.startswith('3.')], defaults)
+        for index, expected in [('4.3', '15:00'), ('4.1', '15:10')]:
+            index_events = [e for e in events if e.index == index]
+            self.assertEqual(len(index_events), 4)
+            self.assertEqual(index_events[0].start.strftime('%H:%M'), expected)
 
     def test_timer_crosses_midnight_and_repeats_daily(self):
         now = datetime(2026, 10, 30, 23, 30, tzinfo=WIB)

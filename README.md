@@ -2,6 +2,17 @@
 
 Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal default aktif saat bot dijalankan. Gunakan `/trex i:3.1 w:11:20` untuk mengganti timer index berdasarkan waktu T-Rex terakhir muncul. `/trex` tanpa opsi tetap menampilkan spawn terdekat.
 
+## Index yang tersedia
+
+Index **3.1, 3.2, 4.1, dan 4.3** dapat dipilih melalui opsi `i` pada `/trex`. Index 4.1 dan 4.3 belum memiliki jam default: isi waktu terakhir muncul agar timer dan pengingatnya aktif. Rumus waktunya sama, yaitu 6 jam 40 menit–7 jam setelah kemunculan terakhir. Setiap index memiliki timer tersendiri yang tersimpan setelah restart dan berulang setiap hari sampai diperbarui.
+
+```text
+/trex i:4.3 w:08:20
+/trex i:4.1 w:08:30
+```
+
+Jam di atas hanya contoh; masukkan waktu aktual dalam WIB. `/jadwal` menampilkan semua slot harian aktif dan menandai index yang belum diisi. Tidak perlu mengubah `.env` atau membuat database baru untuk kedua index tambahan.
+
 ## Update timer lewat Discord
 
 ```text

@@ -7,6 +7,7 @@ import math
 import sqlite3
 
 WIB = ZoneInfo('Asia/Jakarta')
+SUPPORTED_INDICES = ('3.1', '3.2', '4.1', '4.3')
 DEFAULT_SLOTS = (('3.1', time(11, 20)), ('3.2', time(12, 47)),
                  ('3.1', time(18, 0)), ('3.2', time(19, 27)))
 DEFAULT_OFFSETS = (30, 15, 5, 0)
@@ -83,8 +84,8 @@ class Timer:
 
 
 def calculate_timer(index, waktu, tanggal=None, now=None):
-    if index not in ('3.1', '3.2'):
-        raise ValueError('Index harus 3.1 atau 3.2.')
+    if index not in SUPPORTED_INDICES:
+        raise ValueError('Index harus salah satu dari: ' + ', '.join(SUPPORTED_INDICES) + '.')
     now = (now or datetime.now(WIB)).astimezone(WIB)
     at = parse_time(waktu)
     day = now.date()
