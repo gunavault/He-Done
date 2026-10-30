@@ -41,6 +41,7 @@ class Reminder:
     index: str
     start: datetime
     minutes_before: int
+    end: datetime | None = None
 
     @property
     def trigger(self):
@@ -56,9 +57,12 @@ class Reminder:
 
     def message(self):
         label = f'H-{self.minutes_before} menit' if self.minutes_before else 'Waktunya spawn'
+        window = (f'{self.start:%H:%M}–{self.end:%H:%M} WIB'
+                  if self.end else f'{self.start:%H:%M} WIB')
         return (f'🦖 **T-Rex — Index {self.index} | {label}**\n'
-                f'Jadwal spawn T-Rex: **{self.start:%H:%M} WIB**.\n'
-                f'Tanggal spawn: {self.start:%d-%m-%Y}')
+                f'Perkiraan spawn T-Rex: **{window}**.\n'
+                f'Tanggal spawn: {self.start:%d-%m-%Y}'
+                + (f'–{self.end:%d-%m-%Y}' if self.end and self.end.date() != self.start.date() else ''))
 
 
 def daily_reminders(day: date, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
@@ -70,39 +74,82 @@ def daily_reminders(day: date, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
     return sorted(reminders, key=lambda r: r.trigger)
 
 
-def next_spawn(now, slots=DEFAULT_SLOTS):
+@dataclass(frozen=True)
+class Timer:
+    index: str
+    observed: datetime
+    start: datetime
+    end: datetime
+
+
+def calculate_timer(index, waktu, tanggal=None, now=None):
+    if index not in ('3.1', '3.2'):
+        raise ValueError('Index harus 3.1 atau 3.2.')
+    now = (now or datetime.now(WIB)).astimezone(WIB)
+    at = parse_time(waktu)
+    day = now.date()
+    if tanggal:
+        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', tanggal):
+            raise ValueError('Tanggal harus YYYY-MM-DD.')
+        try:
+            day = date.fromisoformat(tanggal)
+        except ValueError:
+            raise ValueError('Tanggal tidak valid.') from None
+    observed = datetime.combine(day, at, tzinfo=WIB)
+    if observed > now:
+        raise ValueError('Waktu muncul belum terjadi. Untuk kemarin, isi tanggal:YYYY-MM-DD.')
+    return Timer(index, observed, observed + timedelta(minutes=400), observed + timedelta(minutes=420))
+
+
+def effective_reminders(day, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timers=()):
+    """An updated index replaces all of that index's fallback slots, including future days."""
+    overridden = {timer.index for timer in timers}
+    events = daily_reminders(day, tuple(slot for slot in slots if slot[0] not in overridden), offsets)
+    for timer in timers:
+        start = datetime.combine(day, timer.start.timetz(), tzinfo=WIB)
+        if start < timer.start:
+            continue  # Don't invent an earlier occurrence before the first calculated window.
+        end = start + (timer.end - timer.start)
+        events.extend(Reminder(timer.index, start, offset, end) for offset in offsets)
+    return sorted(events, key=lambda event: event.trigger)
+
+
+def next_spawn(now, slots=DEFAULT_SLOTS, timers=()):
     """Closest scheduled spawn at or after now, including tomorrow's first spawn."""
     now = now.astimezone(WIB)
     candidates = [event for delta in (0, 1)
-                  for event in daily_reminders(now.date() + timedelta(days=delta), slots, offsets=(0,))
-                  if event.start >= now]
+                  for event in effective_reminders(now.date() + timedelta(days=delta), slots, offsets=(0,), timers=timers)
+                  if event.start >= now or (event.end and event.end > now)]
     if not candidates:
         raise ValueError('Belum ada jadwal spawn yang dikonfigurasi.')
     return min(candidates, key=lambda event: event.start)
 
 
-def next_spawn_message(now, slots=DEFAULT_SLOTS):
+def next_spawn_message(now, slots=DEFAULT_SLOTS, timers=()):
     now = now.astimezone(WIB)
-    event = next_spawn(now, slots)
+    event = next_spawn(now, slots, timers)
     seconds = max(0, math.ceil((event.start - now).total_seconds()))
     hours, rest = divmod(seconds, 3600)
     minutes, seconds = divmod(rest, 60)
     parts = [f'{value} {unit}' for value, unit in
              ((hours, 'jam'), (minutes, 'menit'), (seconds, 'detik')) if value]
-    remaining = ' '.join(parts) if parts else 'Sekarang'
+    remaining = ' '.join(parts) if parts else ('Sedang dalam jendela spawn'
+                if event.end and event.start < now else 'Sekarang')
     day = 'Hari ini' if event.start.date() == now.date() else 'Besok'
+    window = (f'{event.start:%H:%M}–{event.end:%H:%M} WIB'
+              if event.end else f'{event.start:%H:%M} WIB')
     return (f'🦖 **Jadwal T-Rex terdekat**\n'
             f'Index: **{event.index}**\n'
-            f'Spawn: **{event.start:%H:%M} WIB**\n'
+            f'Spawn: **{window}**\n'
             f'Tanggal: {day}, {event.start:%d-%m-%Y}\n'
             f'Sisa waktu: **{remaining}**')
 
 
-def due_reminders(now, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
+def due_reminders(now, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timers=()):
     now = now.astimezone(WIB)
     # Include tomorrow for H-30 before midnight; yesterday covers late polling at midnight.
     for delta in (-1, 0, 1):
-        for reminder in daily_reminders(now.date() + timedelta(days=delta), slots, offsets):
+        for reminder in effective_reminders(now.date() + timedelta(days=delta), slots, offsets, timers):
             if reminder.is_due(now):
                 yield reminder
 
@@ -113,7 +160,21 @@ class Store:
         # Previous 'jobs' table is left intact. Daily mode doesn't consume manual jobs.
         self.db.execute('''CREATE TABLE IF NOT EXISTS deliveries (
             event_key TEXT PRIMARY KEY, sent_at TEXT NOT NULL)''')
+        self.db.execute('''CREATE TABLE IF NOT EXISTS timer_overrides (
+            guild_id TEXT NOT NULL, idx TEXT NOT NULL, observed TEXT NOT NULL,
+            start TEXT NOT NULL, end TEXT NOT NULL, PRIMARY KEY (guild_id, idx))''')
         self.db.commit()
+
+    def set_timer(self, guild_id, timer):
+        with self.db:
+            self.db.execute('INSERT OR REPLACE INTO timer_overrides VALUES (?, ?, ?, ?, ?)',
+                            (str(guild_id), timer.index, timer.observed.isoformat(),
+                             timer.start.isoformat(), timer.end.isoformat()))
+
+    def timers(self, guild_id):
+        rows = self.db.execute('SELECT idx, observed, start, end FROM timer_overrides WHERE guild_id=?',
+                               (str(guild_id),)).fetchall()
+        return tuple(Timer(row[0], *(datetime.fromisoformat(value) for value in row[1:])) for row in rows)
 
     def was_sent(self, key):
         return self.db.execute('SELECT 1 FROM deliveries WHERE event_key=?', (key,)).fetchone() is not None

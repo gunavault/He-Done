@@ -4,6 +4,8 @@ import unittest
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from discord import app_commands
 
 from bot import TrexBot
 from schedule import WIB, daily_reminders
@@ -68,6 +70,64 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('5 jam', args[0])
         self.assertEqual(kwargs['allowed_mentions'].to_dict(), {'parse': []})
         self.bot.send_notice.assert_not_awaited()
+
+    async def update_timer(self, index='3.1', waktu='11:20', now=None):
+        interaction = AsyncMock()
+        interaction.permissions = SimpleNamespace(manage_guild=True)
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+            await self.bot.tree.get_command('trex').callback(interaction, i=index, w=waktu)
+        return interaction
+
+    async def test_update_replaces_reminders_and_survives_restart(self):
+        await self.update_timer()
+        interaction = await self.update_timer(waktu='11:30')
+        confirmation = interaction.followup.send.call_args.args[0]
+        self.assertIn('18:10–18:30 WIB', confirmation)
+        self.assertIn('17:40 WIB', confirmation)
+        await self.bot.deliver_due(datetime(2026, 10, 30, 17, 30, tzinfo=WIB))
+        self.bot.send_notice.assert_not_awaited()
+        await self.bot.deliver_due(datetime(2026, 10, 30, 17, 40, tzinfo=WIB))
+        self.bot.send_notice.assert_awaited_once()
+        self.assertIn('18:10–18:30 WIB', self.bot.send_notice.call_args.args[0])
+        await self.bot.close()
+        self.bot = TrexBot()
+        self.bot.send_notice = AsyncMock()
+        self.assertEqual(len(self.bot.store.timers(self.bot.guild_id)), 1)
+        await self.bot.deliver_due(datetime(2026, 10, 30, 17, 40, tzinfo=WIB))
+        self.bot.send_notice.assert_not_awaited()
+        await self.bot.deliver_due(datetime(2026, 10, 31, 17, 40, tzinfo=WIB))
+        self.bot.send_notice.assert_awaited_once()
+
+    async def test_update_index_isolation_and_nearest_response(self):
+        await self.update_timer()
+        await self.update_timer(index='3.2', waktu='12:47')
+        await self.update_timer(waktu='11:30')
+        timers = {t.index: t for t in self.bot.store.timers(self.bot.guild_id)}
+        self.assertEqual(timers['3.2'].start.strftime('%H:%M'), '19:27')
+        self.assertEqual(self.bot.store.timers('another-guild'), ())
+        interaction = AsyncMock()
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+            await self.bot.tree.get_command('trex').callback(interaction)
+        self.assertIn('18:10–18:30 WIB', interaction.response.send_message.call_args.args[0])
+
+    async def test_partial_and_unauthorized_updates_do_not_mutate(self):
+        interaction = AsyncMock()
+        interaction.permissions = SimpleNamespace(manage_guild=False)
+        callback = self.bot.tree.get_command('trex').callback
+        with self.assertRaises(ValueError):
+            await callback(interaction, i='3.1')
+        with self.assertRaises(app_commands.MissingPermissions):
+            await callback(interaction, i='3.1', w='11:20')
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
+
+    async def test_invalid_time_preserves_existing_timer(self):
+        await self.update_timer()
+        previous = self.bot.store.timers(self.bot.guild_id)
+        with self.assertRaises(ValueError):
+            await self.update_timer(waktu='bad')
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id), previous)
 
     async def test_commands_and_role_mention_scope(self):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'trex', 'jadwal', 'tes'})

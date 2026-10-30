@@ -1,7 +1,7 @@
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import discord
@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -51,28 +51,63 @@ class TrexBot(discord.Client):
                 raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
             return True
 
-        @self.tree.command(name='trex', description='Lihat jadwal spawn T-Rex terdekat dan sisa waktunya')
+        @self.tree.command(name='trex', description='Lihat spawn terdekat atau perbarui timer index dengan i dan w')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        async def trex(interaction: discord.Interaction):
-            await interaction.response.send_message(
-                next_spawn_message(datetime.now(WIB), self.slots),
-                allowed_mentions=discord.AllowedMentions.none())
+        @app_commands.choices(i=[app_commands.Choice(name=x, value=x) for x in ('3.1', '3.2')])
+        @app_commands.describe(i='Index yang timernya diperbarui', w='Waktu terakhir muncul, HH:MM WIB',
+                               tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
+        async def trex(interaction: discord.Interaction, i: str | None = None,
+                       w: str | None = None, tanggal: str | None = None):
+            if i is None and w is None and tanggal is None:
+                await interaction.response.send_message(
+                    next_spawn_message(datetime.now(WIB), self.slots, self.store.timers(self.guild_id)),
+                    allowed_mentions=discord.AllowedMentions.none())
+                return
+            if i is None or w is None:
+                raise ValueError('Untuk update, isi keduanya: /trex i:3.1 w:11:20. Tanpa opsi untuk melihat jadwal.')
+            if not interaction.permissions.manage_guild:
+                raise app_commands.MissingPermissions(['manage_guild'])
+            await interaction.response.defer(ephemeral=True)
+            # The same lock is held by the sender: no old timer can be queued after this update.
+            async with self.lock:
+                now = datetime.now(WIB)
+                timer = calculate_timer(i, w, tanggal, now)
+                self.store.set_timer(self.guild_id, timer)
+                events = [event for delta in (0, 1)
+                          for event in effective_reminders(now.date() + timedelta(days=delta),
+                              self.slots, (0,), self.store.timers(self.guild_id))
+                          if event.index == i and (event.start >= now or event.end > now)]
+                event = min(events, key=lambda event: event.start)
+            lines = [f'✅ Timer index **{i}** diperbarui.',
+                     f'Terakhir muncul: {timer.observed:%d-%m-%Y %H:%M} WIB',
+                     f'Perkiraan spawn berikut: **{event.start:%d-%m-%Y %H:%M}–{event.end:%H:%M} WIB**']
+            for offset in self.offsets:
+                at = event.start - timedelta(minutes=offset)
+                label = f'H-{offset}' if offset else 'Jendela spawn dimulai'
+                status = ' (sudah lewat; dilewati)' if at + timedelta(seconds=60) <= now else ''
+                lines.append(f'{label}: {at:%d-%m %H:%M} WIB{status}')
+            lines.append('Jadwal lama index ini diganti. Berulang setiap hari sampai diperbarui lagi.')
+            await interaction.followup.send('\n'.join(lines), ephemeral=True,
+                                             allowed_mentions=discord.AllowedMentions.none())
 
-        @self.tree.command(name='jadwal', description='Lihat jam pengingat T-Rex harian dalam WIB')
+        @self.tree.command(name='jadwal', description='Lihat jadwal T-Rex berikutnya dan pengingat dalam WIB')
         @app_commands.guild_only()
         @app_commands.check(check_server)
         async def jadwal(interaction: discord.Interaction):
-            day = datetime.now(WIB).date()
-            lines = ['🦖 **Jadwal otomatis setiap hari — WIB**']
-            for index, at in self.slots:
-                reminders = [r for r in daily_reminders(day, self.slots, self.offsets)
-                             if r.index == index and r.start.time() == at]
-                lines.append(f'\n**Index {index} — Spawn {at:%H:%M} WIB**')
-                for r in reminders:
-                    label = f'H-{r.minutes_before}' if r.minutes_before else 'Spawn dimulai'
-                    # Full date makes a configured midnight reminder clear.
-                    lines.append(f'{label}: {r.trigger:%d-%m %H:%M} WIB')
+            now = datetime.now(WIB)
+            timers = self.store.timers(self.guild_id)
+            events = [event for delta in (0, 1)
+                      for event in effective_reminders(now.date() + timedelta(days=delta),
+                          self.slots, (0,), timers) if event.start >= now or (event.end and event.end > now)]
+            lines = ['🦖 **Jadwal berikutnya — WIB, berulang setiap hari**']
+            for event in sorted(events, key=lambda event: event.start)[:len(self.slots)]:
+                window = f'{event.start:%H:%M}' + (f'–{event.end:%H:%M}' if event.end else '')
+                lines.append(f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**')
+                for offset in self.offsets:
+                    at = event.start - timedelta(minutes=offset)
+                    label = f'H-{offset}' if offset else 'Spawn dimulai'
+                    lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
             await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
         @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')
@@ -88,7 +123,7 @@ class TrexBot(discord.Client):
         self.tree.on_error = self.command_error
 
     async def setup_hook(self):
-        # Sync replaces the old manual /trex with the read-only command and removes /hapus.
+        # Sync optional /trex parameters and remove obsolete commands from this guild.
         self.tree.copy_global_to(guild=self.target_guild)
         await self.tree.sync(guild=self.target_guild)
         self.notify.start()
@@ -128,7 +163,7 @@ class TrexBot(discord.Client):
         """One scheduler tick, injectable clock for offline delivery tests."""
         async with self.lock:
             now = now or datetime.now(WIB)
-            for reminder in due_reminders(now, self.slots, self.offsets):
+            for reminder in due_reminders(now, self.slots, self.offsets, self.store.timers(self.guild_id)):
                 key = f'{self.guild_id}|{reminder.key}'
                 if self.store.was_sent(key):
                     continue

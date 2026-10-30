@@ -3,7 +3,7 @@ import unittest
 from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
 from schedule import (WIB, Store, daily_reminders, due_reminders, parse_time,
-                      parse_offsets, parse_times, next_spawn, next_spawn_message)
+                      parse_offsets, parse_times, next_spawn, next_spawn_message, calculate_timer, effective_reminders)
 
 
 class ScheduleTests(unittest.TestCase):
@@ -86,6 +86,49 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn('Sekarang', next_spawn_message(datetime(2026, 10, 30, 18, 0, tzinfo=WIB)))
         with self.assertRaises(ValueError):
             next_spawn(now, slots=())
+
+    def test_calculated_timer_windows_and_offsets(self):
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        for index, at, start, end in [('3.1', '11:20', '18:00', '18:20'),
+                                      ('3.2', '12:47', '19:27', '19:47')]:
+            timer = calculate_timer(index, at, now=now)
+            self.assertEqual((timer.start.strftime('%H:%M'), timer.end.strftime('%H:%M')), (start, end))
+        timer = calculate_timer('3.1', '11:30', now=now)
+        events = [e for e in effective_reminders(now.date(), timers=(timer,)) if e.index == '3.1']
+        self.assertEqual([e.trigger.strftime('%H:%M') for e in events], ['17:40', '17:55', '18:05', '18:10'])
+        self.assertIn('18:10–18:30 WIB', events[0].message())
+        # The old morning and evening slots of this index are replaced.
+        self.assertEqual(len(events), 4)
+        original_other = [e for e in daily_reminders(now.date()) if e.index == '3.2']
+        self.assertEqual([e for e in effective_reminders(now.date(), timers=(timer,)) if e.index == '3.2'], original_other)
+
+    def test_timer_crosses_midnight_and_repeats_daily(self):
+        now = datetime(2026, 10, 30, 23, 30, tzinfo=WIB)
+        timer = calculate_timer('3.1', '23:20', now=now)
+        self.assertEqual(timer.start, datetime(2026, 10, 31, 6, 0, tzinfo=WIB))
+        self.assertFalse([e for e in effective_reminders(now.date(), timers=(timer,)) if e.index == '3.1'])
+        events = effective_reminders(date(2026, 11, 1), timers=(timer,))
+        self.assertIn(datetime(2026, 11, 1, 5, 30, tzinfo=WIB), [e.trigger for e in events if e.index == '3.1'])
+
+    def test_timer_validation_and_previous_day(self):
+        now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
+        for args in [('3.3', '00:00', None), ('3.1', '24:00', None),
+                     ('3.1', '11:20', None), ('3.1', '00:00', '2026-02-30'),
+                     ('3.1', '00:00', '30-10-2026')]:
+            with self.assertRaises(ValueError):
+                calculate_timer(*args, now=now)
+        timer = calculate_timer('3.1', '23:20', '2026-10-30', now=now)
+        self.assertEqual(timer.start.hour, 6)
+        self.assertEqual(timer.observed.date(), date(2026, 10, 30))
+
+    def test_updated_window_remains_visible_until_end(self):
+        timer = calculate_timer('3.1', '11:20', now=datetime(2026, 10, 30, 13, 0, tzinfo=WIB))
+        now = datetime(2026, 10, 30, 18, 5, tzinfo=WIB)
+        event = next_spawn(now, timers=(timer,))
+        self.assertEqual(event.start.hour, 18)
+        self.assertIn('Sedang dalam jendela spawn', next_spawn_message(now, timers=(timer,)))
+        # At the end, the expired window is no longer the nearest.
+        self.assertEqual(next_spawn(datetime(2026, 10, 30, 18, 20, tzinfo=WIB), timers=(timer,)).index, '3.2')
 
     def test_receipt_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as tmp:

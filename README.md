@@ -1,8 +1,31 @@
 # Bot notifikasi T-Rex Discord
 
-Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal langsung aktif saat bot dijalankan; tidak perlu memasukkan waktu lewat slash command.
+Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal default aktif saat bot dijalankan. Gunakan `/trex i:3.1 w:11:20` untuk mengganti timer index berdasarkan waktu T-Rex terakhir muncul. `/trex` tanpa opsi tetap menampilkan spawn terdekat.
 
-## Jadwal harian
+## Update timer lewat Discord
+
+```text
+/trex i:3.1 w:11:20
+/trex i:3.2 w:12:47
+/trex
+/jadwal
+```
+
+Pada slash command Discord, pilih opsi `i` dan `w`; gunakan `:` seperti contoh, bukan mengetik `i=...` sebagai teks pesan biasa.
+
+- `w` adalah **waktu terakhir T-Rex muncul**, bukan jam pengingat atau jam spawn berikutnya.
+- Perkiraan spawn berikutnya adalah **w + 6 jam 40 menit sampai w + 7 jam**, dengan pengingat dihitung dari awal jendela.
+- `/trex i:3.1 w:11:20` menghasilkan jendela **18:00–18:20 WIB**, pengingat **17:30, 17:45, 17:55, 18:00**.
+- Update menjadi `w:11:30` mengganti jendela menjadi **18:10–18:30 WIB**, pengingat **17:40, 17:55, 18:05, 18:10**.
+- Update hanya mengganti index yang dipilih. Seluruh jadwal default/hasil update sebelumnya untuk index itu diganti dengan **satu jendela harian baru**. Index lainnya tidak berubah. Jadi sesudah update 3.1 ke `11:20`, slot tetap 3.1 pukul 11:20 tidak lagi mengirim notifikasi; jendela barunya adalah 18:00–18:20.
+- Jendela hasil update berulang setiap hari pada jam yang sama sampai diubah lagi. Bot tidak menghitung siklus berikutnya dari perkiraan secara otomatis; perbarui `w` saat melihat kemunculan aktual agar waktunya akurat.
+- Timer tersimpan di SQLite, bertahan setelah restart, dan tidak ditimpa konfigurasi jam default di `.env`.
+- Update memerlukan **Manage Server**; `/trex` tanpa opsi dan `/jadwal` bisa digunakan anggota biasa. Konfirmasi update privat dan tidak tag role. Pengingat terjadwal tetap tag role di channel tujuan.
+- Tanggal default adalah hari ini WIB. Jika catatan berasal dari kemarin, isi `tanggal:2026-10-30`, misalnya `/trex i:3.1 w:23:20 tanggal:2026-10-30`. Hasilnya 31-10-2026 06:00–06:20 WIB. Waktu terakhir muncul yang masih di masa depan ditolak.
+- Bila input sudah menghasilkan jendela yang seluruhnya lewat hari ini, bot menampilkan jadwal berulang berikutnya besok. Pengingat yang sudah lewat tidak dikirim sekaligus; tetap mengikuti tenggang 60 detik pada bagian batasan di bawah.
+- `/trex` juga menampilkan jendela hasil update yang sedang berlangsung sampai waktu akhirnya, lalu memilih jadwal berikutnya.
+
+## Jadwal harian default (sebelum index diperbarui)
 
 | Index | H-30 menit | H-15 menit | H-5 menit | Saat spawn |
 | --- | --- | --- | --- | --- |
@@ -11,7 +34,7 @@ Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Men
 | 3.1 | 17:30 | 17:45 | 17:55 | 18:00 |
 | 3.2 | 18:57 | 19:12 | 19:22 | 19:27 |
 
-**Semua jam di atas WIB.** Default mengirim 16 pesan per hari, masing-masing dengan tag role. Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
+**Semua jam di atas WIB.** Sebelum ada update, default mengirim 16 pesan per hari, masing-masing dengan tag role. Setelah kedua index diperbarui, ada satu jendela per index dengan empat notifikasi (8 pesan per hari). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
 
 Contoh pesan pada 10:50 WIB:
 
@@ -48,9 +71,9 @@ DB_PATH=data/trex.sqlite3
 
 Angka ID di atas hanya contoh. Gunakan ID asli; role dan channel harus berada di server yang sama. Jangan menggunakan ID @everyone.
 
-- `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Semua waktu dipicu setiap hari.
+- `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Dipakai hanya untuk index yang belum diperbarui lewat `/trex`.
 - `REMINDER_MINUTES`: menit sebelum spawn. `30,15,5,0` berarti H-30, H-15, H-5, dan saat spawn.
-- Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (12 pesan per hari).
+- Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (3 pesan per jendela spawn).
 - Restart bot setelah mengubah konfigurasi. Pada Docker Compose jalankan ulang `docker compose up -d --build` agar environment baru diterapkan.
 
 ## 3. Jalankan
@@ -97,12 +120,17 @@ docker compose up -d --build
 
 Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; tambahkan `INDEX_31_TIMES`, `INDEX_32_TIMES`, dan `REMINDER_MINUTES` seperti contoh di atas. Jika tidak ditambahkan, default empat jadwal harian tetap digunakan.
 
-Versi ini mengganti penjadwalan manual dengan jadwal harian otomatis. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan lagi. `/trex` kini menampilkan spawn terdekat dan `/hapus` dihapus saat sinkronisasi perintah; jadwal manual lama di database tidak dijalankan. Data lama tidak dihapus.
+Versi ini menambahkan update timer ke jadwal harian. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan; interval perhitungan tetap 400–420 menit. Database lama otomatis mendapat tabel timer baru tanpa menghapus data sebelumnya.
+
+### Wispbyte
+
+Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.txt`, dan `AUTO_UPDATE=1` jika proyek dipasang sebagai git checkout. Restart dari panel untuk menarik kode dan menyinkronkan opsi `/trex`. Jika instalasi tidak memiliki folder `.git`, perbarui file proyek dari GitHub sebelum restart. Jangan mengganti `.env` atau menghapus folder `data/` ketika memperbarui kode.
 
 ## Perintah Discord
 
-- `/trex`: tampilkan satu jadwal spawn terdekat dari semua index, tanggal WIB, dan sisa waktunya. Respons publik tanpa tag role. Jika seluruh jadwal hari ini sudah lewat, otomatis memilih jadwal pertama besok. Pada waktu spawn yang persis sama, jadwal itu masih ditampilkan; sesudahnya memilih jadwal berikutnya. Sisa waktu dihitung saat perintah dipanggil, bukan countdown yang diperbarui otomatis.
-- `/jadwal`: lihat jadwal harian dan seluruh jam pengingat. Respons privat, tidak tag role.
+- `/trex`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika jadwal hari ini sudah lewat, memilih jadwal pertama besok. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
+- `/trex i:3.1 w:11:20`: perbarui timer satu index. `i` dan `w` wajib diisi bersama; `tanggal` opsional. Memerlukan Manage Server.
+- `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
 
 Bot menggunakan slash command, tanpa Message Content Intent. Perintah hanya didaftarkan untuk GUILD_ID yang diatur.
@@ -126,7 +154,7 @@ Setelah dependencies terpasang:
 python -m unittest discover -p 'test_*.py' -v
 ```
 
-Tes memeriksa 16 waktu trigger, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi konfigurasi, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, dan respons `/trex` lintas hari. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
+Tes memeriksa jadwal default dan timer hasil update, pembatalan pengingat lama, isolasi antar-index, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, dan respons `/trex`. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
 ## Referensi
 
