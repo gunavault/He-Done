@@ -1,0 +1,9 @@
+services:
+  trex-bot:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - trex-data:/app/data
+volumes:
+  trex-data:
