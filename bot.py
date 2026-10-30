@@ -11,6 +11,8 @@ from dotenv import load_dotenv
 
 from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES
 
+from voice_alerts import VoiceAnnouncer, speech_for
+
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
 
@@ -43,6 +45,9 @@ class TrexBot(discord.Client):
         self.lock = asyncio.Lock()
         self.tree = app_commands.CommandTree(self)
         self.target_guild = discord.Object(id=self.guild_id)
+        self.voice = VoiceAnnouncer(self, self.guild_id)
+        self._voice_tasks = {}
+        self._voice_retry_after = {}
         self.register_commands()
 
     def register_commands(self):
@@ -126,6 +131,25 @@ class TrexBot(discord.Client):
             await self.send_notice('🦖 **Tes notifikasi T-Rex** — ini hanya pesan uji.')
             await interaction.followup.send('Pesan uji dan tag role dikirim.', ephemeral=True)
 
+        @self.tree.command(name='tesvoice', description='Tes pengumuman suara di voice channel yang diatur')
+        @app_commands.guild_only()
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
+        @app_commands.check(check_server)
+        async def tesvoice(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            if not self.voice.enabled:
+                raise ValueError('Voice belum aktif. Isi VOICE_CHANNEL_ID lalu restart bot.')
+            try:
+                await self.voice.speak('This is a T-Rex notification test. Voice announcements are ready.')
+            except Exception as exc:
+                log.warning('Tes voice gagal: %s', exc)
+                await interaction.followup.send(
+                    'Tes voice gagal. Periksa izin Connect/Speak, dependencies voice, '
+                    'dan koneksi jaringan. Detail ada di Console Wispbyte.', ephemeral=True)
+            else:
+                await interaction.followup.send('Tes suara selesai. Bot sudah keluar dari voice channel.', ephemeral=True)
+
         self.tree.on_error = self.command_error
 
     async def setup_hook(self):
@@ -140,6 +164,8 @@ class TrexBot(discord.Client):
                  self.user, self.user.id if self.user else None, self.guild_id,
                  self.channel_id, self.role_id, self.intents.guilds,
                  [(guild.id, guild.name) for guild in self.guilds], self.offsets)
+        log.info('Voice: enabled=%s VOICE_CHANNEL_ID=%s TTS_VOICE=%s',
+                 self.voice.enabled, self.voice.channel_id, self.voice.voice)
         try:
             channel, role = await self.destination()
         except (discord.HTTPException, ValueError) as exc:
@@ -197,15 +223,45 @@ class TrexBot(discord.Client):
             now = now or datetime.now(WIB)
             for reminder in due_reminders(now, self.slots, self.offsets, self.store.timers(self.guild_id)):
                 key = f'{self.guild_id}|{reminder.key}'
-                if self.store.was_sent(key):
-                    continue
-                try:
-                    await self.send_notice(reminder.message())
-                except (discord.HTTPException, ValueError) as exc:
-                    log.warning('Gagal mengirim %s: %s; dicoba lagi selama tenggang 60 detik.', key, exc)
-                else:
-                    self.store.mark_sent(key, now)
-                    log.info('Terkirim: %s', key)
+                if not self.store.was_sent(key):
+                    try:
+                        await self.send_notice(reminder.message())
+                    except (discord.HTTPException, ValueError) as exc:
+                        log.warning('Gagal mengirim %s: %s; dicoba lagi selama tenggang 60 detik.', key, exc)
+                    else:
+                        self.store.mark_sent(key, now)
+                        log.info('Terkirim: %s', key)
+                self.queue_voice(reminder, key, now)
+
+    def voice_is_current(self, reminder):
+        now = datetime.now(WIB)
+        return any(event.key == reminder.key for event in due_reminders(
+            now, self.slots, self.offsets, self.store.timers(self.guild_id)))
+
+    def queue_voice(self, reminder, key, now):
+        voice_key = 'voice|' + key
+        if (not self.voice.enabled or voice_key in self._voice_tasks
+                or self.store.was_sent(voice_key)):
+            return
+        # Retry voice independently; never resend a successful text message for a voice failure.
+        self._voice_retry_after = {k: at for k, at in self._voice_retry_after.items() if at > now}
+        if voice_key in self._voice_retry_after:
+            return
+        self._voice_retry_after[voice_key] = now + timedelta(seconds=15)
+        self._voice_tasks[voice_key] = asyncio.create_task(
+            self.deliver_voice(reminder, voice_key), name='trex-voice')
+
+    async def deliver_voice(self, reminder, voice_key):
+        try:
+            spoken = await self.voice.speak(speech_for(reminder),
+                                           is_current=lambda: self.voice_is_current(reminder))
+            if spoken:
+                self.store.mark_sent(voice_key, datetime.now(WIB))
+                log.info('Voice terkirim: %s', voice_key)
+        except Exception as exc:
+            log.warning('Pengumuman voice gagal (%s): %s; notifikasi teks tetap terpisah.', voice_key, exc)
+        finally:
+            self._voice_tasks.pop(voice_key, None)
 
     @tasks.loop(seconds=5)
     async def notify(self):
@@ -238,6 +294,11 @@ class TrexBot(discord.Client):
                 await task
             except asyncio.CancelledError:
                 pass
+        voice_tasks = list(self._voice_tasks.values())
+        for voice_task in voice_tasks:
+            voice_task.cancel()
+        if voice_tasks:
+            await asyncio.gather(*voice_tasks, return_exceptions=True)
         self.store.close()
         await super().close()
 

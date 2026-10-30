@@ -56,6 +56,44 @@ Jadwal spawn T-Rex: 11:20 WIB.
 Tanggal spawn: 31-10-2026
 ```
 
+## Pengumuman suara di voice channel
+
+Fitur opsional: pada setiap waktu pengingat aktif, bot masuk ke satu voice channel, membacakan pengumuman dalam bahasa Inggris, lalu keluar. Contoh H-30:
+
+> T-Rex on index three point one is expected to spawn in 30 minutes. Get ready!
+
+Saat jendela spawn dimulai, bot mengatakan bahwa jendela spawn sedang dimulai. Mendukung semua index, termasuk 4.1 dan 4.3.
+
+1. Perbarui seluruh file kode, termasuk **`voice_alerts.py`** dan `requirements.txt`. Untuk instalasi Git, jalankan `git pull origin main`.
+2. Pasang dependencies terbaru: `python -m pip install -r requirements.txt`. Pada Wispbyte, startup memasangnya dari `REQUIREMENTS_FILE=requirements.txt` sebelum bot berjalan.
+3. Di Discord, klik kanan **voice channel biasa** tujuan → Copy Channel ID. Jangan gunakan ID channel teks/forum/Stage.
+4. Tambahkan konfigurasi pada `.env` atau variabel environment aktif di panel:
+
+```ini
+VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
+TTS_VOICE=en-US-GuyNeural
+REMINDER_MINUTES=30,15,5,0
+```
+
+Ganti `ISI_ID_VOICE_CHANNEL` dengan angka ID asli. `CHANNEL_ID` tetap berisi ID channel **teks** yang dipakai untuk tag role; `VOICE_CHANNEL_ID` adalah tujuan **suara** yang terpisah. Kosongkan `VOICE_CHANNEL_ID` untuk menonaktifkan suara.
+
+5. Berikan bot izin **View Channel**, **Connect**, dan **Speak** pada voice channel tersebut. Bot juga harus tidak di-server-mute. Tidak perlu Administrator.
+6. Restart bot, lalu jalankan **`/tesvoice`** melalui akun dengan Manage Server. Masuk ke voice channel tujuan untuk mendengarnya.
+
+Log startup menampilkan `Voice: enabled=True VOICE_CHANNEL_ID=...`. Jika pengingat aktif hanya `30,15`, suara juga hanya dipicu pada H-30 dan H-15; untuk H-5 dan saat spawn, ubah `REMINDER_MINUTES` seperti contoh di atas. Mendengar suara tidak mengirim push notification ke pengguna yang tidak berada di voice channel.
+
+### Dependencies dan batasan hosting
+
+- `discord.py[voice]` memasang dukungan koneksi voice termasuk PyNaCl/DAVE. Audio dikonversi menjadi Opus melalui FFmpeg.
+- `imageio-ffmpeg` menyediakan binary FFmpeg pada wheel platform yang didukung, sehingga umumnya tidak perlu menjalankan apt/sudo di Wispbyte. Jika platform tidak didukung atau binary tidak dapat dijalankan, sediakan FFmpeg dari hosting dan isi `FFMPEG_PATH=/path/to/ffmpeg`.
+- Sintesis memakai **edge-tts**, yang mengakses layanan TTS online Microsoft Edge. Teks pengumuman dikirim ke layanan tersebut; bot tidak merekam mikrofon atau percakapan anggota. Ini integrasi komunitas yang bergantung pada layanan eksternal, sehingga sintesis bisa gagal jika akses diblokir atau layanan berubah.
+- Hosting harus mengizinkan koneksi TTS HTTPS/WebSocket dan koneksi voice Discord termasuk UDP. Jika `/tesvoice` gagal, periksa log Console; jika ada timeout koneksi voice, konfirmasikan dukungan UDP dengan penyedia hosting.
+- Pengumuman suara diantrekan agar tidak saling bertabrakan. Antrean yang sudah lewat tenggang 60 detik atau dibatalkan oleh update timer dilewati sebelum pemutaran.
+- Pengiriman suara berjalan terpisah dari scheduler teks. Kegagalan audio tidak mengirim ulang pesan teks yang sudah berhasil. Suara dicoba ulang dengan jeda 15 detik selama pengingat masih dalam tenggang 60 detik.
+- Status suara tersimpan terpisah di database agar restart normal tidak membacakan ulang pengumuman yang sudah selesai. Jika bot mati tepat setelah suara selesai tetapi sebelum status tersimpan, pengulangan masih mungkin terjadi.
+- Bot keluar setelah pemutaran selesai/gagal. Jika bot sedang memiliki sesi voice lain, fitur ini tidak memindahkan atau memutus sesi itu.
+- `/tesvoice` langsung membacakan pesan uji di channel yang dikonfigurasi. Perintah update timer dan `/trex` biasa tidak mengeluarkan suara langsung.
+
 ## 1. Buat dan undang bot
 
 1. Buka https://discord.com/developers/applications dan buat New Application.
@@ -142,6 +180,7 @@ Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.t
 - `/trex`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika jadwal hari ini sudah lewat, memilih jadwal pertama besok. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
 - `/trex i:3.1 w:11:20`: perbarui timer satu index. `i` dan `w` wajib diisi bersama; `tanggal` opsional. Memerlukan Manage Server.
 - `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
+- `/tesvoice`: tes suara di voice channel yang dikonfigurasi, kemudian keluar. Memerlukan **Manage Server**.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
 
 Bot menggunakan slash command, tanpa Message Content Intent. Perintah hanya didaftarkan untuk GUILD_ID yang diatur.
@@ -165,7 +204,7 @@ Setelah dependencies terpasang:
 python -m unittest discover -p 'test_*.py' -v
 ```
 
-Tes memeriksa jadwal default dan timer hasil update, pembatalan pengingat lama, isolasi antar-index, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, dan respons `/trex`. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
+Tes memeriksa jadwal default dan timer hasil update, pembatalan pengingat lama, isolasi antar-index, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, respons `/trex`, antrean suara, pembatalan timer, izin voice, dan pembersihan koneksi/audio saat gagal. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
 ## Referensi
 

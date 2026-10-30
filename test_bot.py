@@ -18,7 +18,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.env = patch.dict(os.environ, {
             'GUILD_ID': '123', 'CHANNEL_ID': '456', 'ROLE_ID': '789',
             'INDEX_31_TIMES': '11:20,18:00', 'INDEX_32_TIMES': '12:47,19:27',
-            'REMINDER_MINUTES': '30,15,5,0',
+            'REMINDER_MINUTES': '30,15,5,0', 'VOICE_CHANNEL_ID': '',
             'DB_PATH': str(Path(self.tmp.name) / 'test.sqlite3'),
         })
         self.env.start()
@@ -168,6 +168,64 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         for index in ('3.1', '3.2', '4.1', '4.3'):
             self.assertIn(f'**Index {index}', message)
 
+    async def flush_voice(self):
+        tasks = list(self.bot._voice_tasks.values())
+        if tasks:
+            import asyncio
+            await asyncio.gather(*tasks)
+
+    async def test_voice_receipt_prevents_duplicates_independently_of_text(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.speak = AsyncMock(return_value=True)
+        now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
+        await self.bot.deliver_due(now)
+        await self.flush_voice()
+        await self.bot.deliver_due(now + timedelta(seconds=5))
+        await self.flush_voice()
+        self.bot.send_notice.assert_awaited_once()
+        self.bot.voice.speak.assert_awaited_once()
+        self.assertIn('in 30 minutes', self.bot.voice.speak.call_args.args[0])
+
+    async def test_voice_failure_retries_without_resending_text(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.speak = AsyncMock(side_effect=RuntimeError('TTS offline'))
+        now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
+        await self.bot.deliver_due(now)
+        await self.flush_voice()
+        await self.bot.deliver_due(now + timedelta(seconds=5))
+        await self.flush_voice()
+        self.assertEqual(self.bot.voice.speak.await_count, 1)
+        self.bot.voice.speak.side_effect = None
+        self.bot.voice.speak.return_value = True
+        await self.bot.deliver_due(now + timedelta(seconds=15))
+        await self.flush_voice()
+        self.assertEqual(self.bot.voice.speak.await_count, 2)
+        self.bot.send_notice.assert_awaited_once()
+
+    async def test_voice_can_succeed_even_when_text_fails(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.speak = AsyncMock(return_value=True)
+        self.bot.send_notice.side_effect = ValueError('Text permission denied')
+        await self.bot.deliver_due(datetime(2026, 10, 30, 10, 50, tzinfo=WIB))
+        await self.flush_voice()
+        self.bot.voice.speak.assert_awaited_once()
+
+    async def test_voice_job_is_invalidated_by_timer_update(self):
+        event = daily_reminders(date(2026, 10, 30))[0]
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = event.trigger
+            self.assertTrue(self.bot.voice_is_current(event))
+        await self.update_timer(waktu='11:30')
+        with patch('bot.datetime') as clock:
+            clock.now.return_value = event.trigger
+            self.assertFalse(self.bot.voice_is_current(event))
+
+    async def test_voice_command_is_admin_only_and_reports_disabled_setting(self):
+        command = self.bot.tree.get_command('tesvoice')
+        self.assertTrue(command.default_permissions.manage_guild)
+        with self.assertRaisesRegex(ValueError, 'VOICE_CHANNEL_ID'):
+            await command.callback(AsyncMock())
+
     def fake_destination(self, *, channel_cached=True, member_cached=True):
         role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)
         member = SimpleNamespace(id=999)
@@ -227,7 +285,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.destination()
 
     async def test_commands_and_role_mention_scope(self):
-        self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'trex', 'jadwal', 'tes'})
+        self.assertEqual({c.name for c in self.bot.tree.get_commands()}, {'trex', 'jadwal', 'tes', 'tesvoice'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()
         role = type('FakeRole', (), {'id': 789, 'mention': '<@&789>'})()
