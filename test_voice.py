@@ -14,7 +14,7 @@ from voice_alerts import VoiceAnnouncer, speech_for
 
 class VoiceTests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
-        self.env = patch.dict(os.environ, {'VOICE_CHANNEL_ID': '888', 'TTS_VOICE': 'en-US-GuyNeural'})
+        self.env = patch.dict(os.environ, {'VOICE_CHANNEL_ID': '888', 'TTS_VOICE': 'id-ID-ArdiNeural', 'VOICE_OUTRO_PATH': ''})
         self.env.start()
         member = SimpleNamespace(id=999)
         self.guild = SimpleNamespace(id=123, unavailable=False, me=member, voice_client=None)
@@ -119,10 +119,55 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.voice_client.disconnect.await_count, 2)
         self.assertEqual(self.voice_client.play.call_count, 2)
 
+    async def test_indonesian_default_voice_and_outro_configuration(self):
+        with patch.dict(os.environ, {}, clear=False):
+            os.environ.pop('TTS_VOICE', None)
+            os.environ.pop('VOICE_OUTRO_PATH', None)
+            announcer = VoiceAnnouncer(self.client, 123)
+        self.assertEqual(announcer.voice, 'id-ID-ArdiNeural')
+        self.assertEqual(announcer.outro_path.name, 'outro.mp3')
+        self.assertTrue(announcer.outro_path.is_file())
+
+    async def test_speech_then_original_mp3_then_disconnect(self):
+        outro = Path(__file__).resolve().parent / 'assets' / 'outro.mp3'
+        self.announcer.outro_path = outro
+        speech_source, outro_source = MagicMock(), MagicMock()
+        self.announcer.audio_source.side_effect = [speech_source, outro_source]
+        self.assertTrue(await self.announcer.speak('Pengumuman. RAWWRRRRR!'))
+        tracks = [call.args[0] for call in self.announcer.audio_source.call_args_list]
+        self.assertEqual(tracks[0].name, 'announcement.mp3')
+        self.assertEqual(tracks[1], outro)
+        self.assertEqual([call.args[0] for call in self.voice_client.play.call_args_list],
+                         [speech_source, outro_source])
+        self.voice_client.disconnect.assert_awaited_once()
+        speech_source.cleanup.assert_called_once()
+        outro_source.cleanup.assert_called_once()
+        self.assertTrue(outro.exists(), 'original outro must not be deleted')
+
+    async def test_missing_outro_has_clear_error_before_joining(self):
+        self.announcer.outro_path = Path('/nonexistent/trex-outro.mp3')
+        with self.assertRaisesRegex(ValueError, 'assets/outro.mp3'):
+            await self.announcer.speak('Tes')
+        self.channel.connect.assert_not_awaited()
+        self.announcer.synthesize.assert_not_awaited()
+
+    async def test_outro_playback_error_still_disconnects(self):
+        self.announcer.outro_path = Path(__file__).resolve().parent / 'assets' / 'outro.mp3'
+        count = 0
+        def play(source, after):
+            nonlocal count
+            count += 1
+            after(None if count == 1 else RuntimeError('Outro failed'))
+        self.voice_client.play.side_effect = play
+        with self.assertRaisesRegex(RuntimeError, 'Outro failed'):
+            await self.announcer.speak('Tes. RAWWRRRRR!')
+        self.voice_client.disconnect.assert_awaited_once()
+
     async def test_spoken_index_and_reminder(self):
         reminder = daily_reminders(date(2026, 10, 30))[0]
-        self.assertIn('index three point one', speech_for(reminder))
-        self.assertIn('in 30 minutes', speech_for(reminder))
+        self.assertIn('indeks tiga titik satu', speech_for(reminder))
+        self.assertIn('dalam 30 menit', speech_for(reminder))
+        self.assertTrue(speech_for(reminder).endswith('RAWWRRRRR!'))
         reminder = daily_reminders(date(2026, 10, 30))[3]
-        self.assertIn('spawn window', speech_for(reminder))
-        self.assertNotIn('in 0 minutes', speech_for(reminder))
+        self.assertIn('Jendela kemunculan', speech_for(reminder))
+        self.assertNotIn('dalam 0 menit', speech_for(reminder))

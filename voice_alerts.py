@@ -10,14 +10,20 @@ import discord
 log = logging.getLogger('trex.voice')
 
 
+ROAR = 'RAWWRRRRR!'
+TEST_SPEECH = f'Ini adalah tes notifikasi T-Rex. Pengumuman suara sudah siap. Bersiaplah! {ROAR}'
+
+
 def speech_for(reminder):
-    words = {'0': 'zero', '1': 'one', '2': 'two', '3': 'three', '4': 'four',
-             '5': 'five', '6': 'six', '7': 'seven', '8': 'eight', '9': 'nine', '.': 'point'}
+    words = {'0': 'nol', '1': 'satu', '2': 'dua', '3': 'tiga', '4': 'empat',
+             '5': 'lima', '6': 'enam', '7': 'tujuh', '8': 'delapan', '9': 'sembilan', '.': 'titik'}
     index = ' '.join(words.get(char, char) for char in reminder.index)
     if reminder.minutes_before:
-        return (f'T-Rex on index {index} is expected to spawn in '
-                f'{reminder.minutes_before} minutes. Get ready!')
-    return f'The T-Rex spawn window on index {index} is starting now. Get ready!'
+        message = (f'Perhatian! T-Rex di indeks {index} diperkirakan muncul dalam '
+                   f'{reminder.minutes_before} menit. Bersiaplah!')
+    else:
+        message = f'Perhatian! Jendela kemunculan T-Rex di indeks {index} dimulai sekarang. Bersiaplah!'
+    return f'{message} {ROAR}'
 
 
 class VoiceAnnouncer:
@@ -28,7 +34,11 @@ class VoiceAnnouncer:
         self.channel_id = int(raw) if raw else 0
         if self.channel_id < 0:
             raise ValueError('VOICE_CHANNEL_ID harus ID voice channel, atau kosong untuk menonaktifkan.')
-        self.voice = os.getenv('TTS_VOICE', 'en-US-GuyNeural').strip() or 'en-US-GuyNeural'
+        self.voice = os.getenv('TTS_VOICE', 'id-ID-ArdiNeural').strip() or 'id-ID-ArdiNeural'
+        raw_outro = os.getenv('VOICE_OUTRO_PATH', 'assets/outro.mp3').strip()
+        self.outro_path = Path(raw_outro) if raw_outro else None
+        if self.outro_path is not None and not self.outro_path.is_absolute():
+            self.outro_path = Path(__file__).resolve().parent / self.outro_path
         self.lock = asyncio.Lock()
 
     @property
@@ -67,6 +77,28 @@ class VoiceAnnouncer:
         # Opus is encoded by FFmpeg so a separate system libopus isn't required here.
         return discord.FFmpegOpusAudio(str(path), executable=executable)
 
+    async def play_track(self, voice_client, path):
+        source = self.audio_source(path)
+        try:
+            loop = asyncio.get_running_loop()
+            finished = loop.create_future()
+
+            def complete(error):
+                if not finished.done():
+                    if error:
+                        finished.set_exception(error)
+                    else:
+                        finished.set_result(None)
+
+            def after(error):
+                loop.call_soon_threadsafe(complete, error)
+
+            voice_client.play(source, after=after)
+            await asyncio.wait_for(finished, timeout=30)
+        finally:
+            voice_client.stop()
+            source.cleanup()
+
     async def speak(self, text, is_current=lambda: True):
         if not self.enabled:
             return False
@@ -74,9 +106,11 @@ class VoiceAnnouncer:
             if not is_current():
                 return False
             voice_client = None
-            source = None
             try:
                 async with asyncio.timeout(60):
+                    if self.outro_path is not None and not self.outro_path.is_file():
+                        raise ValueError('Audio penutup tidak ditemukan. Perbarui assets/outro.mp3 '
+                                         'atau periksa VOICE_OUTRO_PATH.')
                     channel = await self.destination()
                     # Don't move/disconnect a session belonging to a different operation.
                     if channel.guild.voice_client is not None:
@@ -91,22 +125,10 @@ class VoiceAnnouncer:
                         # Recheck after the network handshake: an index may have been updated.
                         if not is_current():
                             return False
-                        source = self.audio_source(path)
-                        loop = asyncio.get_running_loop()
-                        finished = loop.create_future()
-
-                        def complete(error):
-                            if not finished.done():
-                                if error:
-                                    finished.set_exception(error)
-                                else:
-                                    finished.set_result(None)
-
-                        def after(error):
-                            loop.call_soon_threadsafe(complete, error)
-
-                        voice_client.play(source, after=after)
-                        await asyncio.wait_for(finished, timeout=30)
+                        # Stay in the same connection until speech + roar + original MP3 finish.
+                        await self.play_track(voice_client, path)
+                        if self.outro_path is not None:
+                            await self.play_track(voice_client, self.outro_path)
                         log.info('Pengumuman voice selesai: channel_id=%s', self.channel_id)
                         return True
             finally:
@@ -116,5 +138,3 @@ class VoiceAnnouncer:
                         await asyncio.wait_for(voice_client.disconnect(force=True), timeout=5)
                     except Exception as exc:
                         log.warning('Gagal membersihkan koneksi voice: %s', exc)
-                if source is not None:
-                    source.cleanup()

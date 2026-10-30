@@ -184,7 +184,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.flush_voice()
         self.bot.send_notice.assert_awaited_once()
         self.bot.voice.speak.assert_awaited_once()
-        self.assertIn('in 30 minutes', self.bot.voice.speak.call_args.args[0])
+        self.assertIn('dalam 30 menit', self.bot.voice.speak.call_args.args[0])
 
     async def test_voice_failure_retries_without_resending_text(self):
         self.bot.voice.channel_id = 888
@@ -225,6 +225,14 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(command.default_permissions.manage_guild)
         with self.assertRaisesRegex(ValueError, 'VOICE_CHANNEL_ID'):
             await command.callback(AsyncMock())
+
+    async def test_voice_test_uses_indonesian_text_and_roar(self):
+        self.bot.voice.channel_id = 888
+        self.bot.voice.speak = AsyncMock(return_value=True)
+        await self.bot.tree.get_command('tesvoice').callback(AsyncMock())
+        speech = self.bot.voice.speak.call_args.args[0]
+        self.assertIn('Ini adalah tes notifikasi T-Rex', speech)
+        self.assertTrue(speech.endswith('RAWWRRRRR!'))
 
     def fake_destination(self, *, channel_cached=True, member_cached=True):
         role = SimpleNamespace(id=789, mentionable=True, is_default=lambda: False)

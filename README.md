@@ -58,24 +58,31 @@ Tanggal spawn: 31-10-2026
 
 ## Pengumuman suara di voice channel
 
-Fitur opsional: pada setiap waktu pengingat aktif, bot masuk ke satu voice channel, membacakan pengumuman dalam bahasa Inggris, lalu keluar. Contoh H-30:
+Fitur opsional: pada setiap waktu pengingat aktif, bot masuk ke satu voice channel, membacakan pengumuman dengan suara pria Indonesia **Ardi**, mengucapkan **RAWWRRRRR!**, memutar MP3 penutup, lalu keluar. Contoh H-30:
 
-> T-Rex on index three point one is expected to spawn in 30 minutes. Get ready!
+> Perhatian! T-Rex di indeks tiga titik satu diperkirakan muncul dalam 30 menit. Bersiaplah! RAWWRRRRR!
 
 Saat jendela spawn dimulai, bot mengatakan bahwa jendela spawn sedang dimulai. Mendukung semua index, termasuk 4.1 dan 4.3.
 
-1. Perbarui seluruh file kode, termasuk **`voice_alerts.py`** dan `requirements.txt`. Untuk instalasi Git, jalankan `git pull origin main`.
+1. Perbarui seluruh file kode, termasuk **`voice_alerts.py`**, `requirements.txt`, dan folder **`assets/`** berisi `outro.mp3`. Untuk instalasi Git, jalankan `git pull origin main`.
 2. Pasang dependencies terbaru: `python -m pip install -r requirements.txt`. Pada Wispbyte, startup memasangnya dari `REQUIREMENTS_FILE=requirements.txt` sebelum bot berjalan.
 3. Di Discord, klik kanan **voice channel biasa** tujuan → Copy Channel ID. Jangan gunakan ID channel teks/forum/Stage.
 4. Tambahkan konfigurasi pada `.env` atau variabel environment aktif di panel:
 
 ```ini
 VOICE_CHANNEL_ID=ISI_ID_VOICE_CHANNEL
-TTS_VOICE=en-US-GuyNeural
+TTS_VOICE=id-ID-ArdiNeural
+VOICE_OUTRO_PATH=assets/outro.mp3
 REMINDER_MINUTES=30,15,5,0
 ```
 
 Ganti `ISI_ID_VOICE_CHANNEL` dengan angka ID asli. `CHANNEL_ID` tetap berisi ID channel **teks** yang dipakai untuk tag role; `VOICE_CHANNEL_ID` adalah tujuan **suara** yang terpisah. Kosongkan `VOICE_CHANNEL_ID` untuk menonaktifkan suara.
+
+Jika `.env` atau variabel Startup masih berisi `TTS_VOICE=en-US-GuyNeural`, ubah menjadi `id-ID-ArdiNeural`; konfigurasi lama tidak ditimpa otomatis oleh kode.
+
+`assets/outro.mp3` adalah MP3 penutup dari pengguna dan disertakan dalam repositori. Urutannya: **pengumuman bahasa Indonesia → ucapan RAWWRRRRR! → MP3 asli → keluar dari voice channel**. RAWWRRRRR dibacakan oleh TTS; bukan efek raungan dinosaurus terpisah. `/tesvoice` memakai urutan yang sama. MP3 hanya diputar, tidak dipakai melatih atau meniru suara untuk TTS.
+
+Path relatif `VOICE_OUTRO_PATH` dihitung dari folder proyek, bukan working directory terminal. Kosongkan `VOICE_OUTRO_PATH=` jika tidak ingin MP3 penutup. Jika file yang dikonfigurasi hilang, fitur suara mencatat error yang jelas; pesan teks tetap berjalan. Untuk Wispbyte yang memakai upload manual, pastikan file berada di `/home/container/assets/outro.mp3`.
 
 5. Berikan bot izin **View Channel**, **Connect**, dan **Speak** pada voice channel tersebut. Bot juga harus tidak di-server-mute. Tidak perlu Administrator.
 6. Restart bot, lalu jalankan **`/tesvoice`** melalui akun dengan Manage Server. Masuk ke voice channel tujuan untuk mendengarnya.
@@ -91,7 +98,7 @@ Log startup menampilkan `Voice: enabled=True VOICE_CHANNEL_ID=...`. Jika penging
 - Pengumuman suara diantrekan agar tidak saling bertabrakan. Antrean yang sudah lewat tenggang 60 detik atau dibatalkan oleh update timer dilewati sebelum pemutaran.
 - Pengiriman suara berjalan terpisah dari scheduler teks. Kegagalan audio tidak mengirim ulang pesan teks yang sudah berhasil. Suara dicoba ulang dengan jeda 15 detik selama pengingat masih dalam tenggang 60 detik.
 - Status suara tersimpan terpisah di database agar restart normal tidak membacakan ulang pengumuman yang sudah selesai. Jika bot mati tepat setelah suara selesai tetapi sebelum status tersimpan, pengulangan masih mungkin terjadi.
-- Bot keluar setelah pemutaran selesai/gagal. Jika bot sedang memiliki sesi voice lain, fitur ini tidak memindahkan atau memutus sesi itu.
+- Bot keluar setelah pengumuman dan MP3 penutup selesai, atau jika pemutaran gagal. Jika bot sedang memiliki sesi voice lain, fitur ini tidak memindahkan atau memutus sesi itu.
 - `/tesvoice` langsung membacakan pesan uji di channel yang dikonfigurasi. Perintah update timer dan `/trex` biasa tidak mengeluarkan suara langsung.
 
 ## 1. Buat dan undang bot

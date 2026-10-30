@@ -3,4 +3,5 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY bot.py schedule.py voice_alerts.py ./
+COPY assets/ ./assets/
 CMD ["python", "bot.py"]

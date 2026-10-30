@@ -11,7 +11,7 @@ from dotenv import load_dotenv
 
 from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES
 
-from voice_alerts import VoiceAnnouncer, speech_for
+from voice_alerts import VoiceAnnouncer, speech_for, TEST_SPEECH
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -141,7 +141,7 @@ class TrexBot(discord.Client):
             if not self.voice.enabled:
                 raise ValueError('Voice belum aktif. Isi VOICE_CHANNEL_ID lalu restart bot.')
             try:
-                await self.voice.speak('This is a T-Rex notification test. Voice announcements are ready.')
+                await self.voice.speak(TEST_SPEECH)
             except Exception as exc:
                 log.warning('Tes voice gagal: %s', exc)
                 await interaction.followup.send(
