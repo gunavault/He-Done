@@ -50,6 +50,15 @@ class TrexBot(discord.Client):
         self._voice_retry_after = {}
         self.register_commands()
 
+    def require_timer_role(self, interaction):
+        member = interaction.user
+        if (interaction.guild_id != self.guild_id or self.role_id == self.guild_id
+                or not isinstance(member, discord.Member)
+                or not any(role.id == self.role_id for role in member.roles)):
+            raise app_commands.CheckFailure(
+                'Hanya anggota dengan role yang ditentukan pada ROLE_ID di .env '
+                'yang dapat memperbarui timer.')
+
     def register_commands(self):
         async def check_server(interaction):
             if interaction.guild_id != self.guild_id:
@@ -71,8 +80,7 @@ class TrexBot(discord.Client):
                 return
             if index is None or waktu is None:
                 raise ValueError('Untuk update, isi keduanya: /trex index:3.1 waktu:11:20. Tanpa opsi untuk melihat jadwal.')
-            if not interaction.permissions.manage_guild:
-                raise app_commands.MissingPermissions(['manage_guild'])
+            self.require_timer_role(interaction)
             await interaction.response.defer(ephemeral=True)
             # The same lock is held by the sender: no old timer can be queued after this update.
             async with self.lock:

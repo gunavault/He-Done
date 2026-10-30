@@ -31,10 +31,18 @@ Pada slash command Discord, pilih opsi `index` dan `waktu`; gunakan `:` seperti 
 - Update hanya mengganti index yang dipilih. Seluruh jadwal default/hasil update sebelumnya untuk index itu diganti dengan **satu jendela harian baru**. Index lainnya tidak berubah. Jadi sesudah update 3.1 ke `11:20`, slot tetap 3.1 pukul 11:20 tidak lagi mengirim notifikasi; jendela barunya adalah 18:00–18:20.
 - Jendela hasil update berulang setiap hari pada jam yang sama sampai diubah lagi. Bot tidak menghitung siklus berikutnya dari perkiraan secara otomatis; perbarui `waktu` saat melihat kemunculan aktual agar waktunya akurat.
 - Timer tersimpan di SQLite, bertahan setelah restart, dan tidak ditimpa konfigurasi jam default di `.env`.
-- Update memerlukan **Manage Server**; `/trex` tanpa opsi dan `/jadwal` bisa digunakan anggota biasa. Konfirmasi update privat dan tidak tag role. Pengingat terjadwal tetap tag role di channel tujuan.
+- Update hanya diizinkan bagi anggota yang memiliki role dengan ID persis sama dengan **`ROLE_ID`** di environment aktif; `/trex` tanpa opsi dan `/jadwal` bisa digunakan anggota biasa. Konfirmasi update privat dan tidak tag role. Pengingat terjadwal tetap tag role di channel tujuan.
 - Tanggal default adalah hari ini WIB. Jika catatan berasal dari kemarin, isi `tanggal:2026-10-30`, misalnya `/trex index:3.1 waktu:23:20 tanggal:2026-10-30`. Hasilnya 31-10-2026 06:00–06:20 WIB. Waktu terakhir muncul yang masih di masa depan ditolak.
 - Bila input sudah menghasilkan jendela yang seluruhnya lewat hari ini, bot menampilkan jadwal berulang berikutnya besok. Pengingat yang sudah lewat tidak dikirim sekaligus; tetap mengikuti tenggang 60 detik pada bagian batasan di bawah.
 - `/trex` juga menampilkan jendela hasil update yang sedang berlangsung sampai waktu akhirnya, lalu memilih jadwal berikutnya.
+
+## Izin edit timer
+
+`ROLE_ID` digunakan untuk dua hal: role yang ditag pada notifikasi dan role yang boleh memperbarui timer lewat `/trex index:... waktu:...`. Pemeriksaan memakai ID role dari anggota yang memanggil perintah, bukan nama role. Anggota dengan role itu tidak memerlukan Manage Server untuk mengedit.
+
+Pemilik server/admin yang tidak memiliki role tersebut juga tidak dapat mengedit timer melalui bot. Berikan role yang sesuai kepada operator yang ditunjuk. `ROLE_ID` tidak boleh diisi ID @everyone.
+
+`/trex` tanpa opsi dan `/jadwal` tetap dapat dipakai anggota server untuk melihat jadwal. `/tes` dan `/tesvoice` tetap memakai batasan Manage Server. Restart bot setelah mengubah `ROLE_ID` di `.env` atau Startup Wispbyte; jika keduanya mengatur nilai tersebut, pastikan environment aktif menggunakan ID yang dimaksud.
 
 ## Jadwal harian default (sebelum index diperbarui)
 
@@ -206,7 +214,7 @@ Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.t
 ## Perintah Discord
 
 - `/trex`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika jadwal hari ini sudah lewat, memilih jadwal pertama besok. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
-- `/trex index:3.1 waktu:11:20`: perbarui timer satu index. `index` dan `waktu` wajib diisi bersama; `tanggal` opsional. Memerlukan Manage Server.
+- `/trex index:3.1 waktu:11:20`: perbarui timer satu index. `index` dan `waktu` wajib diisi bersama; `tanggal` opsional. Hanya anggota dengan role sesuai `ROLE_ID` yang dapat mengedit.
 - `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
 - `/tesvoice`: tes suara di voice channel yang dikonfigurasi, kemudian keluar. Memerlukan **Manage Server**.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.

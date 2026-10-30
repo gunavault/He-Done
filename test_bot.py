@@ -74,7 +74,10 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def update_timer(self, index='3.1', waktu='11:20', now=None):
         interaction = AsyncMock()
-        interaction.permissions = SimpleNamespace(manage_guild=True)
+        interaction.guild_id = self.bot.guild_id
+        interaction.permissions = SimpleNamespace(manage_guild=False)
+        interaction.user = MagicMock(spec=discord.Member)
+        interaction.user.roles = [SimpleNamespace(id=self.bot.role_id)]
         with patch('bot.datetime') as clock:
             clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('trex').callback(interaction, index=index, waktu=waktu)
@@ -119,8 +122,58 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         callback = self.bot.tree.get_command('trex').callback
         with self.assertRaises(ValueError):
             await callback(interaction, index='3.1')
-        with self.assertRaises(app_commands.MissingPermissions):
+        with self.assertRaises(app_commands.CheckFailure):
             await callback(interaction, index='3.1', waktu='11:20')
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
+
+    async def test_timer_edit_requires_exact_env_role_even_for_admins(self):
+        interaction = AsyncMock()
+        interaction.guild_id = self.bot.guild_id
+        interaction.user = MagicMock(spec=discord.Member)
+        interaction.permissions = SimpleNamespace(manage_guild=True, administrator=True)
+        callback = self.bot.tree.get_command('trex').callback
+        for roles in ([], [SimpleNamespace(id=111, name='Hunter')]):
+            interaction.user.roles = roles
+            with self.assertRaisesRegex(app_commands.CheckFailure, 'ROLE_ID'):
+                await callback(interaction, index='3.1', waktu='11:20')
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
+        interaction.followup.send.assert_not_awaited()
+
+    async def test_role_holder_can_update_without_manage_server(self):
+        interaction = await self.update_timer()
+        self.assertFalse(interaction.permissions.manage_guild)
+        self.assertEqual(self.bot.store.timers(self.bot.guild_id)[0].index, '3.1')
+        self.assertIn('Timer index **3.1** diperbarui', interaction.followup.send.call_args.args[0])
+
+    async def test_role_check_rejects_wrong_server_nonmember_and_everyone_role(self):
+        interaction = AsyncMock()
+        interaction.guild_id = self.bot.guild_id
+        interaction.user = MagicMock(spec=discord.Member)
+        interaction.user.roles = [SimpleNamespace(id=self.bot.role_id)]
+        interaction.guild_id = 999
+        with self.assertRaises(app_commands.CheckFailure):
+            self.bot.require_timer_role(interaction)
+        interaction.guild_id = self.bot.guild_id
+        interaction.user = SimpleNamespace(roles=[SimpleNamespace(id=self.bot.role_id)])
+        with self.assertRaises(app_commands.CheckFailure):
+            self.bot.require_timer_role(interaction)
+        interaction.user = MagicMock(spec=discord.Member)
+        self.bot.role_id = self.bot.guild_id
+        interaction.user.roles = [SimpleNamespace(id=self.bot.guild_id)]
+        with self.assertRaises(app_commands.CheckFailure):
+            self.bot.require_timer_role(interaction)
+
+    async def test_members_without_edit_role_can_still_read_schedule(self):
+        interaction = AsyncMock()
+        interaction.guild_id = self.bot.guild_id
+        interaction.user = MagicMock(spec=discord.Member)
+        interaction.user.roles = []
+        for name in ('trex', 'jadwal'):
+            command = self.bot.tree.get_command(name)
+            for check in command.checks:
+                self.assertTrue(await check(interaction))
+            await command.callback(interaction)
+        self.assertEqual(interaction.response.send_message.await_count, 2)
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
 
     async def test_invalid_time_preserves_existing_timer(self):
