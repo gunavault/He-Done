@@ -1,44 +1,59 @@
 # Bot notifikasi T-Rex Discord
 
-Bot Python untuk satu server, satu channel teks, dan satu role. Menggunakan slash command; tidak perlu Message Content Intent atau membaca pesan chat.
+Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal langsung aktif saat bot dijalankan; tidak perlu memasukkan waktu lewat slash command.
 
-## Aturan yang diasumsikan
+## Jadwal harian
 
-T-Rex diperkirakan muncul 6 jam 40 menit sampai 7 jam setelah waktu index dicatat. Ini diturunkan dari contoh, bukan aturan game yang sudah diverifikasi. Ubah SPAWN_MIN_MINUTES dan SPAWN_MAX_MINUTES jika berbeda.
+| Index | H-30 menit | H-15 menit | H-5 menit | Saat spawn |
+| --- | --- | --- | --- | --- |
+| 3.1 | 10:50 | 11:05 | 11:15 | 11:20 |
+| 3.2 | 12:17 | 12:32 | 12:42 | 12:47 |
+| 3.1 | 17:30 | 17:45 | 17:55 | 18:00 |
+| 3.2 | 18:57 | 19:12 | 19:22 | 19:27 |
 
-| Index | Waktu catatan WIB | Jendela kemunculan WIB |
-| --- | --- | --- |
-| 3.1 | 11:20 | 18:00–18:20 |
-| 3.2 | 12:47 | 19:27–19:47 |
+**Semua jam di atas WIB.** Default mengirim 16 pesan per hari, masing-masing dengan tag role. Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
 
-Bot mengirim satu pesan dengan tag role di awal jendela. Bot memeriksa setiap 15 detik; pengiriman dapat terlambat akibat koneksi atau rate limit Discord. Bot tidak mengetahui spawn dari game secara otomatis: waktu perlu dicatat melalui `/trex` setiap siklus. Tidak ada pengulangan harian otomatis dan tidak ada jadwal yang diaktifkan sebelum kamu memasukkannya.
+Contoh pesan pada 10:50 WIB:
+
+```text
+@T-Rex Hunter
+🦖 T-Rex — Index 3.1 | H-30 menit
+Jadwal spawn T-Rex: 11:20 WIB.
+Tanggal spawn: 31-10-2026
+```
 
 ## 1. Buat dan undang bot
 
 1. Buka https://discord.com/developers/applications dan buat New Application.
-2. Buka halaman Bot, buat/reset token jika diperlukan. Simpan token di `.env` sendiri; jangan kirim token ke chat atau unggah ke Git.
+2. Pada halaman Bot, buat/reset token jika diperlukan. Simpan token sendiri di `.env`; jangan kirim ke chat atau unggah ke Git.
 3. Pada halaman instalasi/OAuth2 URL Generator, pilih scope `bot` dan `applications.commands`, lalu undang ke server.
-4. Berikan izin **View Channel** dan **Send Messages** pada channel tujuan. Bot tidak memerlukan Administrator.
-5. Agar role bisa ditag, aktifkan **Allow anyone to @mention this role** pada role tujuan. Alternatifnya, beri bot izin **Mention @everyone, @here, and All Roles** pada channel tujuan. Kode membatasi mention ke role yang diatur; @everyone tidak digunakan.
-6. Di Discord, Settings → Advanced → aktifkan Developer Mode. Salin Server ID, Channel ID, serta Role ID melalui menu klik kanan.
+4. Berikan **View Channel** dan **Send Messages** pada channel tujuan. Bot tidak memerlukan Administrator.
+5. Agar role bisa ditag, aktifkan **Allow anyone to @mention this role** pada role tujuan. Alternatifnya, beri bot izin **Mention @everyone, @here, and All Roles** pada channel itu. Kode hanya mengizinkan mention role yang dikonfigurasi.
+6. Di Discord, Settings → Advanced → aktifkan Developer Mode. Klik kanan untuk menyalin Server ID, Channel ID, serta Role ID.
 
-## 2. Isi konfigurasi
+## 2. Konfigurasi
 
-Salin `.env.example` menjadi `.env`, lalu isi empat nilai pertama:
+Salin `.env.example` menjadi `.env` **jika belum punya**, lalu isi empat nilai pertama:
 
 ```ini
 DISCORD_TOKEN=token_bot_discord
 GUILD_ID=123456789012345678
 CHANNEL_ID=234567890123456789
 ROLE_ID=345678901234567890
-SPAWN_MIN_MINUTES=400
-SPAWN_MAX_MINUTES=420
+INDEX_31_TIMES=11:20,18:00
+INDEX_32_TIMES=12:47,19:27
+REMINDER_MINUTES=30,15,5,0
 DB_PATH=data/trex.sqlite3
 ```
 
-Gunakan ID asli dari servermu; angka di atas hanya contoh. Jangan menggunakan ID @everyone. Role dan channel harus berada di server tersebut.
+Angka ID di atas hanya contoh. Gunakan ID asli; role dan channel harus berada di server yang sama. Jangan menggunakan ID @everyone.
 
-## 3. Jalankan dengan Python
+- `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Semua waktu dipicu setiap hari.
+- `REMINDER_MINUTES`: menit sebelum spawn. `30,15,5,0` berarti H-30, H-15, H-5, dan saat spawn.
+- Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (12 pesan per hari).
+- Restart bot setelah mengubah konfigurasi. Pada Docker Compose jalankan ulang `docker compose up -d --build` agar environment baru diterapkan.
+
+## 3. Jalankan
 
 Gunakan Python 3.11 atau lebih baru. Buka terminal di folder proyek.
 
@@ -62,65 +77,55 @@ cp .env.example .env
 .venv/bin/python bot.py
 ```
 
-Jika `.env` sudah diisi, lewati langkah salin agar tidak tertimpa. Python/venv harus terpasang; gunakan python3.11 atau python3.12 bila python3 bawaan Rocky masih 3.9.
+**Lewati langkah salin jika `.env` sudah diisi**, agar token dan ID tidak tertimpa. Bila Python bawaan Rocky masih 3.9, gunakan python3.11 atau python3.12.
 
-## Alternatif: Docker Compose
-
-Setelah mengisi `.env`:
+Alternatif Docker Compose, setelah `.env` diisi:
 
 ```bash
 docker compose up -d --build
 docker compose logs -f
 ```
 
-Data disimpan pada named volume `trex-data`. Jangan gunakan `docker compose down -v` jika ingin mempertahankan jadwal. Jalankan hanya **satu instance** untuk konfigurasi bot/database ini agar tidak mengirim ganda.
+Status pengiriman tersimpan pada named volume `trex-data`. Jangan menjalankan `docker compose down -v` jika ingin mempertahankan status. Jalankan hanya **satu instance** bot dengan database ini untuk mencegah pesan ganda.
 
-## 4. Gunakan di Discord
-
-Admin atau anggota dengan izin **Manage Server** bisa mengatur jadwal. Anggota lain bisa melihat `/jadwal`. Perintah didaftarkan hanya pada GUILD_ID yang dipilih.
-
-```text
-/trex index:3.1 waktu:11:20
-/trex index:3.2 waktu:12:47
-/jadwal
-/tes
-/hapus index:3.1
-```
-
-Parameter `waktu` merupakan waktu catatan awal, bukan waktu notifikasi. Default tanggal adalah hari ini WIB. Jika catatan berasal dari kemarin, isi tanggal secara eksplisit:
-
-```text
-/trex index:3.1 waktu:23:20 tanggal:2026-10-30
-```
-
-Contoh itu menghasilkan jendela 31-10-2026 06:00–06:20 WIB. Waktu catatan yang masih di masa depan atau jendela yang seluruhnya sudah lewat ditolak. Memasukkan index yang sama akan mengganti jadwal lama, termasuk status terkirimnya. Jangan masukkan ulang catatan yang sama setelah terkirim kecuali memang ingin notifikasi baru.
-
-`/trex` hanya memberi konfirmasi privat; pesan publik bertag role dikirim pada awal jendela. `/tes` **langsung** mengirim pesan uji publik dan tag role. Untuk contoh 3.1, pesannya:
-
-```text
-@T-Rex Hunter
-🦖 T-Rex — Index 3.1
-Waktu index dicatat: 30-10-2026 11:20 WIB
-T-Rex diperkirakan muncul antara 30-10-2026 18:00–30-10-2026 18:20 WIB.
-```
-
-## Restart, kendala, dan batasan
-
-- Komputer/server harus menyala, proses bot berjalan, dan tersambung ke internet saat pengiriman.
-- Jadwal dan status terkirim disimpan di SQLite. Setelah restart, jadwal pending dikirim bila masih berada dalam jendela; jika seluruh jendela lewat, jadwal ditandai kedaluwarsa tanpa mengirim pesan basi.
-- Bila pengiriman gagal, bot mencoba lagi setiap pemeriksaan selama jendela masih aktif. Periksa log bila izin/channel/role salah.
-- Bila proses mati sesaat setelah Discord menerima pesan tetapi sebelum status tersimpan, atau respons pengiriman hilang di jaringan, notifikasi dapat terkirim ulang. Implementasi ini tidak menjamin exactly-once delivery.
-- Tag role tidak menjamin push notification pada perangkat setiap anggota; pengaturan notifikasi Discord milik anggota tetap berlaku.
-- Perintah tidak muncul: pastikan bot sudah diundang dengan scope yang sesuai, GUILD_ID benar, dan sinkronisasi perintah berhasil pada log. Restart aplikasi Discord bila perlu.
-- Saat mengganti GUILD_ID, hapus bot/integrasi atau perintah lama dari server sebelumnya jika tidak dibutuhkan; perintah pada server lama tetap ditolak oleh kode.
-
-## Pemeriksaan lokal
+## Update dari versi sebelumnya
 
 ```bash
-python -m unittest -v test_schedule.py
+git pull origin main
+docker compose up -d --build
 ```
 
-Tes mencakup perhitungan dua contoh, pergantian hari, validasi input, penolakan jadwal lewat, serta persistensi/penggantian/penghapusan jadwal. Pengiriman Discord perlu diuji dengan `/tes` setelah token dan ID dipasang.
+Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; tambahkan `INDEX_31_TIMES`, `INDEX_32_TIMES`, dan `REMINDER_MINUTES` seperti contoh di atas. Jika tidak ditambahkan, default empat jadwal harian tetap digunakan.
+
+Versi ini mengganti penjadwalan manual dengan jadwal harian otomatis. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan lagi. `/trex` dan `/hapus` dihapus saat sinkronisasi perintah; jadwal manual lama di database tidak dijalankan. Data lama tidak dihapus.
+
+## Perintah Discord
+
+- `/jadwal`: lihat jadwal harian dan seluruh jam pengingat. Respons privat, tidak tag role.
+- `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
+
+Bot menggunakan slash command, tanpa Message Content Intent. Perintah hanya didaftarkan untuk GUILD_ID yang diatur.
+
+## Ketepatan waktu, restart, dan kendala
+
+- Bot harus tetap berjalan dan terhubung ke internet. Menyimpan kode di GitHub tidak menjalankan bot otomatis.
+- Scheduler memeriksa setiap 5 detik, sehingga waktu pengiriman bisa bergeser beberapa detik. Koneksi dan rate limit Discord juga dapat menambah keterlambatan.
+- Setelah berhasil dikirim, setiap pengingat dicatat di SQLite berdasarkan server, index, waktu spawn, dan offset. Restart normal tidak mengirim ulang pengingat yang sudah tercatat. Tanggal berikutnya mempunyai pengingat baru.
+- Ada tenggang **60 detik** sejak waktu trigger untuk pengiriman/retry. Pengingat yang sudah lewat lebih lama dilewati agar H-30 tidak muncul saat sudah H-5. Jika bot mati sepanjang waktu pengingat, pesan tersebut terlewat; pengingat berikutnya tetap berjalan.
+- Jika jam spawn dini hari diatur, pengingat sebelum tengah malam dikaitkan dengan tanggal spawn besok secara otomatis.
+- Jika proses mati tepat setelah Discord menerima pesan namun sebelum status tersimpan, atau respons pengiriman hilang di jaringan, pesan dapat terkirim ulang. Implementasi ini tidak menjamin exactly-once delivery.
+- Tag role tidak menjamin push notification pada perangkat setiap anggota karena pengaturan notifikasi Discord anggota tetap berlaku.
+- Jika tidak terkirim, periksa log, ID, dan izin channel/role. Jika perintah tidak muncul, pastikan scope instalasi dan GUILD_ID benar serta sinkronisasi di log berhasil.
+
+## Tes tanpa mengirim ke Discord
+
+Setelah dependencies terpasang:
+
+```bash
+python -m unittest discover -p 'test_*.py' -v
+```
+
+Tes memeriksa 16 waktu trigger, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi konfigurasi, restart, retry, pengingat kedaluwarsa, dan pembatasan mention role. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
 ## Referensi
 

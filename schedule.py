@@ -1,71 +1,97 @@
-from datetime import datetime, timedelta
+"""Daily WIB reminders and durable delivery receipts; no Discord dependency."""
+from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 import re
 import sqlite3
 
 WIB = ZoneInfo('Asia/Jakarta')
+DEFAULT_SLOTS = (('3.1', time(11, 20)), ('3.2', time(12, 47)),
+                 ('3.1', time(18, 0)), ('3.2', time(19, 27)))
+DEFAULT_OFFSETS = (30, 15, 5, 0)
+GRACE_SECONDS = 60
 
 
-def calculate(waktu, tanggal=None, now=None, minimum=400, maximum=420):
-    now = now or datetime.now(WIB)
-    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', waktu):
-        raise ValueError('Waktu harus HH:MM, contoh 11:20.')
-    if tanggal:
-        if not re.fullmatch(r'\d{4}-\d{2}-\d{2}', tanggal):
-            raise ValueError('Tanggal harus YYYY-MM-DD.')
-        try:
-            day = datetime.strptime(tanggal, '%Y-%m-%d').date()
-        except ValueError:
-            raise ValueError('Tanggal tidak valid.') from None
-    else:
-        day = now.date()
-    hour, minute = map(int, waktu.split(':'))
-    base = datetime(day.year, day.month, day.day, hour, minute, tzinfo=WIB)
-    if base > now:
-        raise ValueError('Waktu catatan belum terjadi. Untuk catatan kemarin, isi tanggal.')
-    start = base + timedelta(minutes=minimum)
-    end = base + timedelta(minutes=maximum)
-    if end <= now:
-        raise ValueError('Jendela kemunculan sudah lewat. Periksa waktu dan tanggal.')
-    return base, start, end
+def parse_time(value):
+    if not re.fullmatch(r'(?:[01]\d|2[0-3]):[0-5]\d', value):
+        raise ValueError('Jam harus HH:MM WIB, contoh 18:00.')
+    return time.fromisoformat(value)
 
 
-def describe(index, base, start, end):
-    # Dates on both endpoints make windows spanning midnight unambiguous.
-    return (f'🦖 **T-Rex — Index {index}**\n'
-            f'Waktu index dicatat: {base:%d-%m-%Y %H:%M} WIB\n'
-            f'T-Rex diperkirakan muncul antara **{start:%d-%m-%Y %H:%M}–'
-            f'{end:%d-%m-%Y %H:%M} WIB**.')
+def parse_times(value):
+    result = tuple(parse_time(item.strip()) for item in value.split(','))
+    if len(set(result)) != len(result):
+        raise ValueError('Jam spawn untuk satu index tidak boleh duplikat.')
+    return result
+
+
+def parse_offsets(value):
+    try:
+        offsets = tuple(int(item.strip()) for item in value.split(','))
+    except ValueError:
+        raise ValueError('REMINDER_MINUTES harus angka dipisah koma, contoh 30,15,5,0.') from None
+    if not offsets or len(set(offsets)) != len(offsets) or any(n < 0 or n > 1440 for n in offsets):
+        raise ValueError('REMINDER_MINUTES harus unik dan berada antara 0–1440 menit.')
+    return tuple(sorted(offsets, reverse=True))
+
+
+@dataclass(frozen=True)
+class Reminder:
+    index: str
+    start: datetime
+    minutes_before: int
+
+    @property
+    def trigger(self):
+        return self.start - timedelta(minutes=self.minutes_before)
+
+    @property
+    def key(self):
+        return f'{self.index}|{self.start.isoformat()}|{self.minutes_before}'
+
+    def is_due(self, now):
+        # Missed countdowns must not arrive hours late after downtime.
+        return self.trigger <= now < self.trigger + timedelta(seconds=GRACE_SECONDS)
+
+    def message(self):
+        label = f'H-{self.minutes_before} menit' if self.minutes_before else 'Waktunya spawn'
+        return (f'🦖 **T-Rex — Index {self.index} | {label}**\n'
+                f'Jadwal spawn T-Rex: **{self.start:%H:%M} WIB**.\n'
+                f'Tanggal spawn: {self.start:%d-%m-%Y}')
+
+
+def daily_reminders(day: date, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
+    reminders = []
+    for index, start_time in slots:
+        start = datetime.combine(day, start_time, tzinfo=WIB)
+        for offset in offsets:
+            reminders.append(Reminder(index, start, offset))
+    return sorted(reminders, key=lambda r: r.trigger)
+
+
+def due_reminders(now, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS):
+    now = now.astimezone(WIB)
+    # Include tomorrow for H-30 before midnight; yesterday covers late polling at midnight.
+    for delta in (-1, 0, 1):
+        for reminder in daily_reminders(now.date() + timedelta(days=delta), slots, offsets):
+            if reminder.is_due(now):
+                yield reminder
 
 
 class Store:
     def __init__(self, path):
         self.db = sqlite3.connect(path)
-        self.db.row_factory = sqlite3.Row
-        self.db.execute('''CREATE TABLE IF NOT EXISTS jobs (
-            idx TEXT PRIMARY KEY, base TEXT NOT NULL, start TEXT NOT NULL,
-            end TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending')''')
+        # Previous 'jobs' table is left intact. Daily mode doesn't consume manual jobs.
+        self.db.execute('''CREATE TABLE IF NOT EXISTS deliveries (
+            event_key TEXT PRIMARY KEY, sent_at TEXT NOT NULL)''')
         self.db.commit()
 
-    def put(self, index, base, start, end):
-        with self.db:
-            self.db.execute('INSERT OR REPLACE INTO jobs VALUES (?, ?, ?, ?, ?)',
-                            (index, base.isoformat(), start.isoformat(), end.isoformat(), 'pending'))
+    def was_sent(self, key):
+        return self.db.execute('SELECT 1 FROM deliveries WHERE event_key=?', (key,)).fetchone() is not None
 
-    def pending(self):
-        return self.db.execute("SELECT * FROM jobs WHERE status='pending' ORDER BY start").fetchall()
-
-    def mark(self, index, status):
+    def mark_sent(self, key, sent_at):
         with self.db:
-            self.db.execute('UPDATE jobs SET status=? WHERE idx=?', (status, index))
-
-    def delete(self, index):
-        with self.db:
-            return self.db.execute('DELETE FROM jobs WHERE idx=?', (index,)).rowcount
+            self.db.execute('INSERT OR IGNORE INTO deliveries VALUES (?, ?)', (key, sent_at.isoformat()))
 
     def close(self):
         self.db.close()
-
-
-def times(row):
-    return tuple(datetime.fromisoformat(row[key]) for key in ('base', 'start', 'end'))

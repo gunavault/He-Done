@@ -1,19 +1,17 @@
 import asyncio
 import logging
 import os
-from pathlib import Path
 from datetime import datetime
+from pathlib import Path
 
 import discord
 from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, calculate, describe, times
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets
 
 ROOT = Path(__file__).resolve().parent
-load_dotenv(ROOT / '.env')
-logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
 log = logging.getLogger('trex')
 
 
@@ -31,10 +29,12 @@ class TrexBot(discord.Client):
         self.guild_id = int(required('GUILD_ID'))
         self.channel_id = int(required('CHANNEL_ID'))
         self.role_id = int(required('ROLE_ID'))
-        self.minimum = int(os.getenv('SPAWN_MIN_MINUTES', '400'))
-        self.maximum = int(os.getenv('SPAWN_MAX_MINUTES', '420'))
-        if not 0 <= self.minimum < self.maximum <= 10080:
-            raise ValueError('Rentang spawn tidak valid: 0 <= minimum < maximum <= 10080 menit.')
+        self.slots = tuple(sorted(
+            [(index, at) for index, env_name, default in (
+                ('3.1', 'INDEX_31_TIMES', '11:20,18:00'),
+                ('3.2', 'INDEX_32_TIMES', '12:47,19:27'))
+             for at in parse_times(os.getenv(env_name, default))], key=lambda slot: slot[1]))
+        self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15,5,0'))
         path = Path(os.getenv('DB_PATH', 'data/trex.sqlite3'))
         if not path.is_absolute():
             path = ROOT / path
@@ -43,14 +43,51 @@ class TrexBot(discord.Client):
         self.lock = asyncio.Lock()
         self.tree = app_commands.CommandTree(self)
         self.target_guild = discord.Object(id=self.guild_id)
+        self.register_commands()
+
+    def register_commands(self):
+        async def check_server(interaction):
+            if interaction.guild_id != self.guild_id:
+                raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
+            return True
+
+        @self.tree.command(name='jadwal', description='Lihat jam pengingat T-Rex harian dalam WIB')
+        @app_commands.guild_only()
+        @app_commands.check(check_server)
+        async def jadwal(interaction: discord.Interaction):
+            day = datetime.now(WIB).date()
+            lines = ['🦖 **Jadwal otomatis setiap hari — WIB**']
+            for index, at in self.slots:
+                reminders = [r for r in daily_reminders(day, self.slots, self.offsets)
+                             if r.index == index and r.start.time() == at]
+                lines.append(f'\n**Index {index} — Spawn {at:%H:%M} WIB**')
+                for r in reminders:
+                    label = f'H-{r.minutes_before}' if r.minutes_before else 'Spawn dimulai'
+                    # Full date makes a configured midnight reminder clear.
+                    lines.append(f'{label}: {r.trigger:%d-%m %H:%M} WIB')
+            await interaction.response.send_message('\n'.join(lines), ephemeral=True)
+
+        @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')
+        @app_commands.guild_only()
+        @app_commands.default_permissions(manage_guild=True)
+        @app_commands.checks.has_permissions(manage_guild=True)
+        @app_commands.check(check_server)
+        async def tes(interaction: discord.Interaction):
+            await interaction.response.defer(ephemeral=True)
+            await self.send_notice('🦖 **Tes notifikasi T-Rex** — ini hanya pesan uji.')
+            await interaction.followup.send('Pesan uji dan tag role dikirim.', ephemeral=True)
+
+        self.tree.on_error = self.command_error
 
     async def setup_hook(self):
+        # Sync also removes the old /trex and /hapus manual commands in this guild.
         self.tree.copy_global_to(guild=self.target_guild)
         await self.tree.sync(guild=self.target_guild)
         self.notify.start()
 
     async def on_ready(self):
-        log.info('Bot terhubung: %s; guild=%s', self.user, self.guild_id)
+        log.info('Bot %s terhubung; jadwal harian WIB=%s, pengingat=%s menit',
+                 self.user, self.slots, self.offsets)
 
     async def destination(self):
         guild = self.get_guild(self.guild_id)
@@ -79,29 +116,44 @@ class TrexBot(discord.Client):
             allowed_mentions=discord.AllowedMentions(
                 everyone=False, users=False, roles=[role], replied_user=False))
 
-    @tasks.loop(seconds=15)
-    async def notify(self):
-        # Keep replacements/cancellations from racing with a send already in progress.
+    async def deliver_due(self, now=None):
+        """One scheduler tick, injectable clock for offline delivery tests."""
         async with self.lock:
-            for row in self.store.pending():
-                base, start, end = times(row)
-                now = datetime.now(WIB)
-                if now >= end:
-                    self.store.mark(row['idx'], 'expired')
-                    log.info('Jadwal index %s kedaluwarsa tanpa dikirim.', row['idx'])
-                    continue
-                if now < start:
+            now = now or datetime.now(WIB)
+            for reminder in due_reminders(now, self.slots, self.offsets):
+                key = f'{self.guild_id}|{reminder.key}'
+                if self.store.was_sent(key):
                     continue
                 try:
-                    await self.send_notice(describe(row['idx'], base, start, end))
+                    await self.send_notice(reminder.message())
                 except (discord.HTTPException, ValueError) as exc:
-                    log.warning('Gagal mengirim index %s: %s; dicoba lagi selama jendela aktif.', row['idx'], exc)
+                    log.warning('Gagal mengirim %s: %s; dicoba lagi selama tenggang 60 detik.', key, exc)
                 else:
-                    self.store.mark(row['idx'], 'sent')
+                    self.store.mark_sent(key, now)
+                    log.info('Terkirim: %s', key)
+
+    @tasks.loop(seconds=5)
+    async def notify(self):
+        if self.is_ready():
+            await self.deliver_due()
 
     @notify.before_loop
     async def before_notify(self):
         await self.wait_until_ready()
+
+    async def command_error(self, interaction, error):
+        original = getattr(error, 'original', error)
+        if isinstance(original, app_commands.MissingPermissions):
+            message = 'Perintah ini memerlukan izin Manage Server.'
+        elif isinstance(original, (ValueError, app_commands.CheckFailure)):
+            message = str(original)
+        else:
+            log.error('Perintah gagal', exc_info=(type(original), original, original.__traceback__))
+            message = 'Perintah gagal. Periksa log bot dan izin channel.'
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
     async def close(self):
         self.notify.cancel()
@@ -115,84 +167,8 @@ class TrexBot(discord.Client):
         await super().close()
 
 
-bot = TrexBot()
-INDEX_CHOICES = [app_commands.Choice(name=x, value=x) for x in ('3.1', '3.2')]
-
-
-async def check_server(interaction):
-    if interaction.guild_id != bot.guild_id:
-        raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
-    return True
-
-
-@bot.tree.command(name='trex', description='Catat waktu index dan jadwalkan notifikasi T-Rex')
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.checks.has_permissions(manage_guild=True)
-@app_commands.check(check_server)
-@app_commands.choices(index=INDEX_CHOICES)
-@app_commands.describe(index='Pilih index', waktu='Waktu index dicatat, HH:MM WIB',
-                       tanggal='Opsional: YYYY-MM-DD; default hari ini WIB')
-async def trex(interaction: discord.Interaction, index: str, waktu: str, tanggal: str | None = None):
-    await interaction.response.defer(ephemeral=True)
-    base, start, end = calculate(waktu, tanggal, minimum=bot.minimum, maximum=bot.maximum)
-    await bot.destination()
-    async with bot.lock:
-        bot.store.put(index, base, start, end)
-    await interaction.followup.send(
-        describe(index, base, start, end) + '\n✅ Jadwal tersimpan. Role akan ditag saat jendela dimulai. '
-        'Jadwal lama untuk index ini diganti.', ephemeral=True)
-
-
-@bot.tree.command(name='jadwal', description='Lihat jadwal T-Rex yang masih menunggu notifikasi')
-@app_commands.guild_only()
-@app_commands.check(check_server)
-async def jadwal(interaction: discord.Interaction):
-    now = datetime.now(WIB)
-    rows = [row for row in bot.store.pending() if times(row)[2] > now]
-    body = '\n\n'.join(describe(row['idx'], *times(row)) for row in rows)
-    await interaction.response.send_message(body or 'Belum ada jadwal aktif.', ephemeral=True)
-
-
-@bot.tree.command(name='hapus', description='Batalkan jadwal untuk satu index')
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.checks.has_permissions(manage_guild=True)
-@app_commands.check(check_server)
-@app_commands.choices(index=INDEX_CHOICES)
-async def hapus(interaction: discord.Interaction, index: str):
-    await interaction.response.defer(ephemeral=True)
-    async with bot.lock:
-        removed = bot.store.delete(index)
-    await interaction.followup.send('Jadwal dihapus.' if removed else 'Jadwal tidak ditemukan.', ephemeral=True)
-
-
-@bot.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')
-@app_commands.guild_only()
-@app_commands.default_permissions(manage_guild=True)
-@app_commands.checks.has_permissions(manage_guild=True)
-@app_commands.check(check_server)
-async def tes(interaction: discord.Interaction):
-    await interaction.response.defer(ephemeral=True)
-    await bot.send_notice('🦖 **Tes notifikasi T-Rex** — bot sudah terhubung. Ini hanya pesan uji.')
-    await interaction.followup.send('Pesan uji dan tag role dikirim.', ephemeral=True)
-
-
-@bot.tree.error
-async def command_error(interaction: discord.Interaction, error: app_commands.AppCommandError):
-    original = getattr(error, 'original', error)
-    if isinstance(original, app_commands.MissingPermissions):
-        message = 'Perintah ini memerlukan izin Manage Server.'
-    elif isinstance(original, (ValueError, app_commands.CheckFailure)):
-        message = str(original)
-    else:
-        log.error('Perintah gagal', exc_info=(type(original), original, original.__traceback__))
-        message = 'Perintah gagal. Periksa log bot dan izin channel.'
-    if interaction.response.is_done():
-        await interaction.followup.send(message, ephemeral=True)
-    else:
-        await interaction.response.send_message(message, ephemeral=True)
-
-
 if __name__ == '__main__':
-    bot.run(required('DISCORD_TOKEN'))
+    load_dotenv(ROOT / '.env')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
+    token = required('DISCORD_TOKEN')
+    TrexBot().run(token)

@@ -1,60 +1,79 @@
 import tempfile
 import unittest
-from datetime import datetime
+from datetime import date, datetime, time, timedelta, timezone
 from pathlib import Path
-from schedule import WIB, Store, calculate, describe, times
+from schedule import (WIB, Store, daily_reminders, due_reminders, parse_time,
+                      parse_offsets, parse_times)
 
 
 class ScheduleTests(unittest.TestCase):
-    def test_examples(self):
-        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-        for base, start, end in [('11:20', '18:00', '18:20'), ('12:47', '19:27', '19:47')]:
-            _, s, e = calculate(base, now=now)
-            self.assertEqual((s.strftime('%H:%M'), e.strftime('%H:%M')), (start, end))
+    def test_all_sixteen_trigger_times(self):
+        events = daily_reminders(date(2026, 10, 30))
+        actual = [(e.index, e.minutes_before, e.trigger.strftime('%H:%M')) for e in events]
+        self.assertEqual(actual, [
+            ('3.1', 30, '10:50'), ('3.1', 15, '11:05'), ('3.1', 5, '11:15'), ('3.1', 0, '11:20'),
+            ('3.2', 30, '12:17'), ('3.2', 15, '12:32'), ('3.2', 5, '12:42'), ('3.2', 0, '12:47'),
+            ('3.1', 30, '17:30'), ('3.1', 15, '17:45'), ('3.1', 5, '17:55'), ('3.1', 0, '18:00'),
+            ('3.2', 30, '18:57'), ('3.2', 15, '19:12'), ('3.2', 5, '19:22'), ('3.2', 0, '19:27')])
+        self.assertIn('11:20 WIB', events[0].message())
+        self.assertIn('19:27 WIB', events[-1].message())
 
-    def test_midnight(self):
-        now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
-        b, s, e = calculate('17:10', '2026-10-30', now=now)
-        self.assertEqual((s.day, s.hour, s.minute), (30, 23, 50))
-        self.assertEqual((e.day, e.hour, e.minute), (31, 0, 10))
-        self.assertIn('31-10-2026 00:10', describe('3.1', b, s, e))
+    def test_trigger_boundaries_and_skip_stale(self):
+        r = daily_reminders(date(2026, 10, 30))[0]
+        self.assertFalse(r.is_due(r.trigger - timedelta(microseconds=1)))
+        self.assertTrue(r.is_due(r.trigger))
+        self.assertTrue(r.is_due(r.trigger + timedelta(seconds=59)))
+        self.assertFalse(r.is_due(r.trigger + timedelta(seconds=60)))
+        self.assertEqual(list(due_reminders(r.trigger + timedelta(minutes=5))), [])
 
-    def test_future_rejected(self):
+    def test_daily_recurrence_has_new_receipt_key(self):
+        today = daily_reminders(date(2026, 10, 30))
+        tomorrow = daily_reminders(date(2026, 10, 31))
+        self.assertTrue(all(a.key != b.key for a, b in zip(today, tomorrow)))
+        self.assertEqual([r.trigger.time() for r in today], [r.trigger.time() for r in tomorrow])
+
+    def test_cross_midnight_early_reminder(self):
+        now = datetime(2026, 10, 30, 23, 40, tzinfo=WIB)
+        due = list(due_reminders(now, slots=(('3.1', time(0, 10)),), offsets=(30,)))
+        self.assertEqual(len(due), 1)
+        self.assertEqual(due[0].start.date(), date(2026, 10, 31))
+        self.assertEqual(due[0].minutes_before, 30)
+
+    def test_utc_clock_uses_wib(self):
+        due = list(due_reminders(datetime(2026, 10, 30, 10, 30, tzinfo=timezone.utc)))
+        self.assertEqual(len(due), 1)
+        self.assertEqual((due[0].index, due[0].minutes_before), ('3.1', 30))
+
+    def test_midnight_early_reminder_message_shows_spawn_date(self):
+        reminder = daily_reminders(date(2026, 10, 31), slots=(('3.1', time(0, 10)),))[0]
+        self.assertIn('31-10-2026', reminder.message())
+        self.assertIn('00:10 WIB', reminder.message())
+
+    def test_configuration(self):
+        self.assertEqual(parse_time('19:27'), time(19, 27))
+        self.assertEqual(parse_times('11:20,18:00'), (time(11, 20), time(18, 0)))
         with self.assertRaises(ValueError):
-            calculate('11:20', now=datetime(2026, 10, 30, 10, 0, tzinfo=WIB))
-
-    def test_expired_rejected(self):
-        with self.assertRaises(ValueError):
-            calculate('11:20', now=datetime(2026, 10, 30, 18, 20, tzinfo=WIB))
-
-    def test_invalid_input(self):
-        for value in ['24:00', '1:20', '11:70', '@everyone']:
+            parse_times('11:20,11:20')
+        self.assertEqual(parse_offsets('5, 30, 15'), (30, 15, 5))
+        for value in ('24:00', '1:20', '11:70'):
             with self.assertRaises(ValueError):
-                calculate(value)
-        with self.assertRaises(ValueError):
-            calculate('11:20', '2026-02-30')
+                parse_time(value)
+        for value in ('', '5,5', '-1', 'abc', '1441'):
+            with self.assertRaises(ValueError):
+                parse_offsets(value)
 
-    def test_persistence_replacement_and_sent(self):
+    def test_receipt_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = Path(tmp) / 'test.sqlite3'
-            now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            first = calculate('11:20', now=now)
-            second = calculate('12:47', now=now)
+            path = Path(tmp) / 'receipt.sqlite3'
+            event = daily_reminders(date(2026, 10, 30))[0]
             store = Store(path)
-            store.put('3.1', *first)
+            self.assertFalse(store.was_sent(event.key))
+            store.mark_sent(event.key, event.trigger)
+            store.mark_sent(event.key, event.trigger)
             store.close()
             store = Store(path)
-            self.assertEqual(times(store.pending()[0]), first)
-            store.put('3.1', *second)
-            self.assertEqual(len(store.pending()), 1)
-            self.assertEqual(times(store.pending()[0]), second)
-            store.mark('3.1', 'sent')
-            store.close()
-            store = Store(path)
-            self.assertEqual(len(store.pending()), 0)
-            store.put('3.2', *first)
-            self.assertEqual(store.delete('3.2'), 1)
-            self.assertEqual(store.delete('3.2'), 0)
+            self.assertTrue(store.was_sent(event.key))
+            self.assertFalse(store.was_sent(daily_reminders(date(2026, 10, 31))[0].key))
             store.close()
 
 
