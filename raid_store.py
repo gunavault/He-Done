@@ -1,11 +1,13 @@
 """Durable manual raid events; independent of T-Rex timer tables."""
 import sqlite3
+import re
 from datetime import datetime, date, timedelta
 
 from schedule import WIB, parse_time, SUPPORTED_INDICES
 
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
+EVENT_POINTS = {'trex': 2, 'savage': 3, 'rift': 1}
 STATUSES = {
     'pending': 'Menunggu diterima', 'accepted': 'Hadir',
     'absent': 'Tidak Hadir',
@@ -51,7 +53,7 @@ class RaidStore:
             CREATE TABLE IF NOT EXISTS raid_points (
                 event_id INTEGER NOT NULL REFERENCES raid_events(id),
                 guild_id TEXT NOT NULL, user_id TEXT NOT NULL,
-                points INTEGER NOT NULL CHECK (points=1), awarded_at TEXT NOT NULL,
+                points INTEGER NOT NULL CHECK (points>0), awarded_at TEXT NOT NULL,
                 PRIMARY KEY (event_id, user_id)
             );
             CREATE TABLE IF NOT EXISTS raid_audit (
@@ -69,7 +71,30 @@ class RaidStore:
                 detail TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS raid_contributions_guild ON raid_contributions(guild_id,user_id);
+            CREATE TABLE IF NOT EXISTS raid_wiped_awards (
+                event_id INTEGER NOT NULL REFERENCES raid_events(id),
+                user_id TEXT NOT NULL, PRIMARY KEY(event_id,user_id)
+            );
+            CREATE TABLE IF NOT EXISTS raid_point_resets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, interaction_id TEXT NOT NULL UNIQUE,
+                guild_id TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL,
+                event_awards INTEGER NOT NULL, contributions INTEGER NOT NULL
+            );
         ''')
+        with self.db:
+            # Replace the old CHECK(points=1) without losing existing awards.
+            schema = self.db.execute("SELECT sql FROM sqlite_master WHERE name='raid_points'").fetchone()[0]
+            if re.search(r'CHECK\s*\(\s*points\s*=\s*1\s*\)', schema, re.I):
+                self.db.execute('ALTER TABLE raid_points RENAME TO raid_points_legacy')
+                self.db.execute('''CREATE TABLE raid_points (
+                    event_id INTEGER NOT NULL REFERENCES raid_events(id), guild_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL, points INTEGER NOT NULL CHECK(points>0),
+                    awarded_at TEXT NOT NULL, PRIMARY KEY(event_id,user_id))''')
+                self.db.execute('INSERT INTO raid_points SELECT * FROM raid_points_legacy')
+                self.db.execute('DROP TABLE raid_points_legacy')
+                self.db.execute('CREATE INDEX raid_points_guild ON raid_points(guild_id,user_id)')
+            if 'voided' not in {row['name'] for row in self.db.execute('PRAGMA table_info(raid_contributions)')}:
+                self.db.execute('ALTER TABLE raid_contributions ADD COLUMN voided INTEGER NOT NULL DEFAULT 0')
         # Upgrade older six-status raids and reconcile one point per accepted member.
         # Idempotent: restarting never adds a second point for an event/user pair.
         with self.db:
@@ -80,9 +105,15 @@ class RaidStore:
                 WHERE p.event_id=raid_points.event_id AND p.user_id=raid_points.user_id
                 AND p.status='accepted' AND e.status IN ('open','completed'))''')
             self.db.execute('''INSERT OR IGNORE INTO raid_points
-                SELECT e.id,e.guild_id,p.user_id,1,p.updated_at
+                SELECT e.id,e.guild_id,p.user_id,
+                    CASE e.kind WHEN 'trex' THEN 2 WHEN 'savage' THEN 3 ELSE 1 END,p.updated_at
                 FROM raid_participants p JOIN raid_events e ON e.id=p.event_id
-                WHERE p.status='accepted' AND e.status IN ('open','completed')''')
+                WHERE p.status='accepted' AND e.status IN ('open','completed')
+                AND NOT EXISTS (SELECT 1 FROM raid_wiped_awards w
+                    WHERE w.event_id=p.event_id AND w.user_id=p.user_id)''')
+            self.db.execute('''UPDATE raid_points SET points=(SELECT
+                CASE kind WHEN 'trex' THEN 2 WHEN 'savage' THEN 3 ELSE 1 END
+                FROM raid_events WHERE id=raid_points.event_id)''')
 
     def event(self, guild_id, event_id):
         row = self.db.execute('SELECT * FROM raid_events WHERE id=? AND guild_id=?',
@@ -143,7 +174,7 @@ class RaidStore:
     def respond(self, guild_id, event_id, user_id, name, attending):
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
-            self._open(guild_id, event_id)
+            event = self._open(guild_id, event_id)
             old = self.db.execute('SELECT status FROM raid_participants WHERE event_id=? AND user_id=?',
                                   (event_id, str(user_id))).fetchone()
             if attending and old and old['status'] == 'accepted':
@@ -163,7 +194,7 @@ class RaidStore:
                    'absent': {'pending', 'accepted', 'absent'}}
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
-            self._open(guild_id, event_id)
+            event = self._open(guild_id, event_id)
             row = self.db.execute('SELECT status FROM raid_participants WHERE event_id=? AND user_id=?',
                                   (event_id, str(user_id))).fetchone()
             if action not in allowed or row is None or row['status'] not in allowed[action]:
@@ -171,8 +202,11 @@ class RaidStore:
             self.db.execute('''UPDATE raid_participants SET status=?,verified_by=?,updated_at=?
                 WHERE event_id=? AND user_id=?''', (action, str(actor_id), datetime.now(WIB).isoformat(), event_id, str(user_id)))
             if action == 'accepted':
-                self.db.execute('INSERT OR IGNORE INTO raid_points VALUES(?,?,?,1,?)',
-                                (event_id, str(guild_id), str(user_id), datetime.now(WIB).isoformat()))
+                self.db.execute('''INSERT OR IGNORE INTO raid_points
+                    SELECT ?,?,?,?,? WHERE NOT EXISTS (
+                        SELECT 1 FROM raid_wiped_awards WHERE event_id=? AND user_id=?)''',
+                    (event_id, str(guild_id), str(user_id), EVENT_POINTS[event['kind']],
+                     datetime.now(WIB).isoformat(), event_id, str(user_id)))
             else:
                 self.db.execute('DELETE FROM raid_points WHERE event_id=? AND user_id=?',
                                 (event_id, str(user_id)))
@@ -222,7 +256,7 @@ class RaidStore:
             FROM (
                 SELECT user_id,points,1 AS events,0 AS contributions FROM raid_points WHERE guild_id=?
                 UNION ALL
-                SELECT user_id,points,0 AS events,1 AS contributions FROM raid_contributions WHERE guild_id=?
+                SELECT user_id,points,0 AS events,1 AS contributions FROM raid_contributions WHERE guild_id=? AND voided=0
             ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
             (str(guild_id), str(guild_id), page * 10)).fetchall()
 
@@ -236,8 +270,35 @@ class RaidStore:
                 FROM raid_points WHERE guild_id=? AND user_id=?
                 UNION ALL
                 SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points
-                FROM raid_contributions WHERE guild_id=? AND user_id=?
+                FROM raid_contributions WHERE guild_id=? AND user_id=? AND voided=0
             )''', (str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
+
+    def wipe_points(self, guild_id, actor_id, interaction_id):
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            old = self.db.execute('SELECT * FROM raid_point_resets WHERE interaction_id=?',
+                                  (str(interaction_id),)).fetchone()
+            if old:
+                if old['guild_id'] != str(guild_id) or old['actor_id'] != str(actor_id):
+                    raise ValueError('Permintaan reset sudah dipakai untuk data berbeda.')
+                return old
+            event_count = self.db.execute('SELECT COUNT(*) FROM raid_points WHERE guild_id=?', (str(guild_id),)).fetchone()[0]
+            contributions = self.db.execute('SELECT COUNT(*) FROM raid_contributions WHERE guild_id=? AND voided=0', (str(guild_id),)).fetchone()[0]
+            self.db.execute('''INSERT OR IGNORE INTO raid_wiped_awards
+                SELECT event_id,user_id FROM raid_points WHERE guild_id=?''', (str(guild_id),))
+            self.db.execute('DELETE FROM raid_points WHERE guild_id=?', (str(guild_id),))
+            self.db.execute('UPDATE raid_contributions SET voided=1 WHERE guild_id=?', (str(guild_id),))
+            cur = self.db.execute('''INSERT INTO raid_point_resets
+                (interaction_id,guild_id,actor_id,created_at,event_awards,contributions)
+                VALUES(?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
+                                       datetime.now(WIB).isoformat(), event_count, contributions))
+            return self.db.execute('SELECT * FROM raid_point_resets WHERE id=?', (cur.lastrowid,)).fetchone()
+
+    def event_credit(self, guild_id, event_id, user_id):
+        self.event(guild_id, event_id)
+        row = self.db.execute('SELECT points FROM raid_points WHERE event_id=? AND user_id=?',
+                              (event_id, str(user_id))).fetchone()
+        return row['points'] if row else 0
 
     def close(self):
         self.db.close()

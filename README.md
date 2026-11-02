@@ -286,9 +286,9 @@ Semua jam WIB. Tanggal default hari ini, dan jam yang sudah lewat ditolak (menit
 Kartu hanya menampilkan **Menunggu diterima**, **Hadir**, dan **Tidak Hadir**.
 
 - **Daftar:** masuk Menunggu diterima. Belum mendapat poin. Klik berulang tidak menggandakan entri; peserta berstatus Hadir tetap Hadir.
-- **Tidak Hadir:** menyatakan tidak ikut/membatalkan pendaftaran. Jika sebelumnya Hadir, 1 poin event ini langsung ditarik. Bisa Daftar lagi, tetapi perlu diterima ulang.
+- **Tidak Hadir:** menyatakan tidak ikut/membatalkan pendaftaran. Jika sebelumnya Hadir, poin event ini langsung ditarik. Bisa Daftar lagi, tetapi perlu diterima ulang.
 - **Kelola — Leader:** panel privat dengan menu peserta, **Hadir**, dan **Tidak Hadir**. Ada navigasi halaman untuk lebih dari 25 peserta.
-- **Hadir:** langsung mengubah status menjadi Hadir dan menambah **1 poin**, tanpa menunggu jam event, verifikasi hadir, atau Selesaikan Event. Maksimal 1 poin per peserta per event, termasuk jika tombol ditekan berulang.
+- **Hadir:** langsung mengubah status menjadi Hadir dan menambah poin sesuai jenis raid: **T-Rex 2**, **Savage 3**, **Rift 1**, tanpa menunggu jam event atau Selesaikan Event. Satu peserta hanya mendapat satu pemberian poin per event, termasuk jika tombol ditekan berulang.
 - Leader dapat menandai peserta **Tidak Hadir** untuk membatalkan penerimaan dan menarik poin. Peserta perlu memilih Daftar lagi sebelum diterima ulang.
 - **Selesaikan Event:** menutup perubahan daftar dan mempertahankan poin yang sudah tercatat, tanpa memberi poin tambahan. Tersedia mulai jam event. Ada konfirmasi sebelum penutupan; periksa daftar dahulu.
 - **Batalkan Event:** menutup event dan menarik semua poin event ini, tanpa memengaruhi poin dari event lain.
@@ -306,9 +306,9 @@ Leader tidak mendapat poin otomatis karena membuat event. Leader/role pengelola 
 
 `user` memilih satu anggota server (bukan bot), `point` bilangan bulat positif 1–1000000, dan `detail` wajib 1–500 karakter setelah spasi tepi dibuang. Perintah dapat dijalankan di channel mana pun pada server yang dikonfigurasi. Respons pemberian poin hanya terlihat oleh administrator yang menjalankan; tidak mengirim ping ke penerima. ID kontribusi, penerima, jumlah poin, detail, pemberi, waktu, dan ID interaksi Discord disimpan di tabel `raid_contributions`. Tidak ada fitur ubah/hapus kontribusi pada versi ini.
 
-Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh 3 event Hadir (3 poin) + satu `/addpoint` 5 poin:
+Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh Hadir pada satu T-Rex (2), satu Savage (3), dan satu Rift (1), ditambah satu `/addpoint` 5 poin:
 
-> 1. **@C. Ago** — **8 poin** · 3 event, 1 contribution
+> 1. **@C. Ago** — **11 poin** · 3 event, 1 contribution
 
 Anggota yang hanya punya poin kontribusi tetap masuk leaderboard dengan 0 event. Poin kontribusi tidak ditarik jika peserta memilih Tidak Hadir atau suatu raid dibatalkan. Pengiriman ulang interaksi Discord yang sama tidak menggandakan pemberian; menjalankan perintah baru adalah kontribusi baru.
 
@@ -323,9 +323,25 @@ Setelah update, restart agar perintah baru tersinkronisasi. Data timer, raid, da
 
 `/point` tanpa opsi menampilkan poin sendiri. Isi `user` untuk melihat satu anggota lain pada server yang sama. Semua anggota bisa memakai perintah ini, tanpa izin Administrator. Hasil hanya terlihat oleh pemanggil: total poin, jumlah event beserta poin event, dan jumlah contribution beserta poin kontribusi. Anggota yang belum mendapat poin ditampilkan sebagai 0. Ringkasan memakai data yang sama dengan leaderboard dan tidak mengubah poin.
 
+### Reset poin hanya dari Console Wispbyte
+
+Tidak ada slash command Discord untuk wipe, tidak memerlukan role atau env owner. Hak Administrator Discord tidak memberi akses reset. Operator yang dapat mengakses console hosting bisa menjalankannya; batasi akses panel Wispbyte sesuai kebutuhan.
+
+Setelah update kode termasuk `console_commands.py`, restart bot. Tunggu log `Console aktif`, lalu ketik langsung di input **Console Wispbyte** saat proses bot berjalan (tanpa `/`):
+
+```text
+wipepoint HAPUS SEMUA POIN
+```
+
+Frasa `HAPUS SEMUA POIN` adalah konfirmasi wajib dan harus sama persis. `wipepoint` saja hanya menampilkan petunjuk, tidak menghapus data. Perintah ini mereset **semua poin event dan kontribusi seluruh anggota pada GUILD_ID aktif**, termasuk jumlah event/contribution yang dihitung oleh leaderboard dan `/point`. Bukan perintah shell, dan jangan dikirim ke chat Discord.
+
+Timer T-Rex, daftar peserta, pesan event, dan detail historis kontribusi tetap disimpan. Riwayat reset disimpan untuk audit. Poin event lama yang direset tidak dipulihkan saat restart atau klik Hadir lagi pada peserta/event yang sama. Peserta baru yang belum memiliki poin pada event itu dan event baru tetap bisa mendapat poin. Kontribusi baru setelah reset juga dihitung normal. Reset tidak dapat dibatalkan lewat bot; buat cadangan database saat bot berhenti jika perlu pemulihan.
+
+Jika hosting tidak menyediakan stdin untuk proses bot, startup mencatat `Input console tidak tersedia`; fitur wipe tidak aktif di lingkungan itu. Jalur stdin telah diuji menggunakan pipe lokal, tetapi penerusan input pada panel Wispbyte perlu dicoba setelah deployment.
+
 ### Data dan restart
 
-`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu poin per anggota per event. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai otomatis diberi 1 poin jika belum tercatat, tanpa menggandakan poin lama. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.
+`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu pemberian poin per anggota per event, dengan bobot menurut jenis raid. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai dihitung ulang sesuai bobot T-Rex 2, Savage 3, Rift 1, tanpa menggandakan jumlah event. Catatan poin yang sudah di-wipe dikecualikan agar tidak muncul lagi. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.
 
 Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online untuk memproses klik; saat offline Discord akan menampilkan kegagalan interaksi. Setelah bot aktif, coba klik kembali. Event tertutup tetap dapat dilihat dengan `/raid`, tetapi tidak menerima perubahan. Jika perubahan kartu gagal akibat izin/jaringan, data tetap tersimpan dan respons mengarahkan ke `/raid event:<nomor>`.
 
@@ -336,7 +352,7 @@ Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online u
 3. Leader membuka Kelola, memilih peserta, dan klik Hadir. `/leaderboard` langsung bertambah 1 poin. Klik Hadir lagi untuk memastikan poin tetap 1.
 4. Restart bot selagi event terbuka dan coba tombol/panel lagi.
 5. Coba Tidak Hadir untuk menarik poin, lalu Daftar dan Hadir ulang. Setelah jam event, Selesaikan Event dan konfirmasi: total poin tetap sama, tidak bertambah lagi.
-6. Untuk membersihkan poin event uji yang masih terbuka, gunakan Batalkan Event. Data/poin uji yang sudah diselesaikan tidak memiliki tombol reset pada versi awal.
+6. Untuk membersihkan poin event uji yang masih terbuka, gunakan Batalkan Event. Reset seluruh poin server tersedia hanya melalui console hosting seperti dijelaskan di bawah.
 
 Tes otomatis mencakup tiga status, poin langsung saat ditandai Hadir, penarikan poin, upgrade data lama, pemulihan setelah restart, izin lintas role/server, pembatalan, leaderboard, isolasi data timer lama, dan klik berulang tanpa poin ganda. Pengujian Discord langsung memerlukan bot berjalan dengan konfigurasi server milikmu.
 

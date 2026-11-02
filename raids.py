@@ -1,4 +1,4 @@
-"""Manual raid registration, leader verification, and one point per event."""
+"""Manual raid registration, leader attendance, and weighted event points."""
 import asyncio
 import logging
 import os
@@ -7,7 +7,7 @@ from datetime import datetime
 import discord
 from discord import app_commands
 
-from raid_store import RaidStore, KINDS, STATUSES, raid_time
+from raid_store import RaidStore, KINDS, STATUSES, EVENT_POINTS, raid_time
 from schedule import WIB, SUPPORTED_INDICES
 
 log = logging.getLogger('trex.raids')
@@ -25,16 +25,16 @@ def event_embed(event, participants):
                          f"**Tempat:** {discord.utils.escape_markdown(discord.utils.escape_mentions(event['place']))}\n"
                          f"**Leader:** <@{event['leader_id']}>\n"
                          f"**Status:** {EVENT_STATUSES[event['status']]}\n"
-                         '**Poin:** langsung +1 saat leader menandai Hadir.')
+                         f"**Poin:** langsung +{EVENT_POINTS[event['kind']]} saat leader menandai Hadir.")
     if event['status'] == 'cancelled':
-        embed.description = embed.description.replace('langsung +1 saat leader menandai Hadir.', 'dibatalkan untuk seluruh peserta event ini.')
+        embed.description = embed.description.replace(f"langsung +{EVENT_POINTS[event['kind']]} saat leader menandai Hadir.", 'dibatalkan untuk seluruh peserta event ini.')
     for status, label in STATUSES.items():
         users = [p for p in participants if p['status'] == status]
         value = ', '.join(f"<@{p['user_id']}>" for p in users[:12]) or '—'
         if len(users) > 12:
             value += f' · +{len(users) - 12} lainnya (lihat panel leader)'
         embed.add_field(name=f'{label} ({len(users)})', value=value, inline=False)
-    embed.set_footer(text='Daftar → leader Hadir → +1 poin. Tidak Hadir membatalkan poin selama event terbuka.')
+    embed.set_footer(text='Daftar → leader Hadir → poin sesuai jenis raid. Tidak Hadir membatalkan poin selama event terbuka.')
     return embed
 
 
@@ -271,7 +271,8 @@ class RaidService:
             status = self.store.respond(self.guild_id, event_id, interaction.user.id,
                                        interaction.user.display_name, action == 'join')
             warning = await self.refresh_notice(event_id)
-        points = '1 poin sudah tercatat.' if status == 'accepted' else 'Tidak ada poin untuk event ini.'
+        credit = self.store.event_credit(self.guild_id, event_id, interaction.user.id)
+        points = f'{credit} poin tercatat untuk event ini.'
         await interaction.followup.send(f'Status kamu: **{STATUSES[status]}**. {points}' + warning,
                                         ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
@@ -281,7 +282,8 @@ class RaidService:
         async with self.lock:
             self.store.moderate(self.guild_id, event_id, user_id, interaction.user.id, action)
             warning = await self.refresh_notice(event_id)
-        points = '1 poin sudah tercatat (maksimal 1 per event).' if action == 'accepted' else 'Poin event ini dibatalkan jika sebelumnya Hadir.'
+        credit = self.store.event_credit(self.guild_id, event_id, user_id)
+        points = f'{credit} poin tercatat untuk event ini; tidak digandakan.' if action == 'accepted' else 'Poin event ini dibatalkan jika sebelumnya Hadir.'
         await interaction.edit_original_response(content=f'Peserta <@{user_id}>: {STATUSES[action]}. {points}' + warning,
             view=LeaderView(self, event_id, interaction.user.id, page), allowed_mentions=discord.AllowedMentions.none())
 
@@ -291,7 +293,8 @@ class RaidService:
         async with self.lock:
             count = self.store.finish(self.guild_id, event_id, interaction.user.id, cancel)
             warning = await self.refresh_notice(event_id)
-        text = 'Event dibatalkan. Semua poin event ini ditarik.' if cancel else f'Event ditutup. {count} peserta masing-masing memiliki 1 poin; tidak ada poin tambahan.'
+        weight = EVENT_POINTS[self.store.event(self.guild_id, event_id)['kind']]
+        text = 'Event dibatalkan. Semua poin event ini ditarik.' if cancel else f'Event ditutup. {count} peserta masing-masing memiliki {weight} poin; tidak ada poin tambahan.'
         await interaction.followup.send(text + warning, ephemeral=True)
 
     def register_commands(self):
@@ -390,7 +393,7 @@ class RaidService:
             if not 1 <= halaman <= 10000:
                 raise ValueError('Halaman harus 1–10000.')
             rows = self.store.leaderboard(self.guild_id, halaman - 1)
-            lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Total poin event dan contribution. Hadir = 1 poin per event.']
+            lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Total poin event dan contribution. T-Rex: 2 · Savage: 3 · Rift: 1 poin.']
             for i, row in enumerate(rows, (halaman - 1) * 10 + 1):
                 lines.append(f"{i}. **<@{row['user_id']}>** — **{row['points']} poin** · {row['events']} event, {row['contributions']} contribution")
             if not rows:
