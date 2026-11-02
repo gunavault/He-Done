@@ -314,6 +314,15 @@ Anggota yang hanya punya poin kontribusi tetap masuk leaderboard dengan 0 event.
 
 Setelah update, restart agar perintah baru tersinkronisasi. Data timer, raid, dan poin sebelumnya tetap dipertahankan.
 
+### Cek poin per anggota
+
+```text
+/point
+/point user:@C.Ago
+```
+
+`/point` tanpa opsi menampilkan poin sendiri. Isi `user` untuk melihat satu anggota lain pada server yang sama. Semua anggota bisa memakai perintah ini, tanpa izin Administrator. Hasil hanya terlihat oleh pemanggil: total poin, jumlah event beserta poin event, dan jumlah contribution beserta poin kontribusi. Anggota yang belum mendapat poin ditampilkan sebagai 0. Ringkasan memakai data yang sama dengan leaderboard dan tidak mengubah poin.
+
 ### Data dan restart
 
 `raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu poin per anggota per event. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai otomatis diberi 1 poin jika belum tercatat, tanpa menggandakan poin lama. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.

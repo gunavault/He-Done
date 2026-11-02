@@ -226,5 +226,18 @@ class RaidStore:
             ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
             (str(guild_id), str(guild_id), page * 10)).fetchall()
 
+    def point_summary(self, guild_id, user_id):
+        return self.db.execute('''SELECT COALESCE(SUM(points),0) AS points,
+                COALESCE(SUM(events),0) AS events,COALESCE(SUM(contributions),0) AS contributions,
+                COALESCE(SUM(event_points),0) AS event_points,
+                COALESCE(SUM(contribution_points),0) AS contribution_points
+            FROM (
+                SELECT points,1 AS events,0 AS contributions,points AS event_points,0 AS contribution_points
+                FROM raid_points WHERE guild_id=? AND user_id=?
+                UNION ALL
+                SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points
+                FROM raid_contributions WHERE guild_id=? AND user_id=?
+            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
+
     def close(self):
         self.db.close()

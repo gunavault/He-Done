@@ -366,6 +366,23 @@ class RaidService:
                 f'✅ Contribution #{receipt}: <@{user.id}> mendapat **{point} poin** · 1 contribution.\n'
                 f'Detail: {safe_detail}', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
+        @self.bot.tree.command(name='point', description='Lihat poin sendiri atau poin satu anggota server')
+        @app_commands.guild_only()
+        @app_commands.check(check_server)
+        @app_commands.describe(user='Opsional: anggota yang diperiksa; kosong untuk poin sendiri')
+        async def point(interaction: discord.Interaction, user: discord.Member | None = None):
+            self.require_guild(interaction)
+            member = user if user is not None else interaction.user
+            if not isinstance(member, discord.Member) or member.guild.id != self.guild_id:
+                raise ValueError('Pilih anggota pada server ini.')
+            summary = self.store.point_summary(self.guild_id, member.id)
+            await interaction.response.send_message(
+                f'🏅 **Poin <@{member.id}>**\n'
+                f"Total: **{summary['points']} poin**\n"
+                f"Event: **{summary['events']} event** · {summary['event_points']} poin\n"
+                f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin",
+                ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
         @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')
         @app_commands.guild_only()
         @app_commands.check(check_server)

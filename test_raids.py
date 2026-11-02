@@ -182,6 +182,20 @@ class RaidStoreTests(unittest.TestCase):
         row = self.store.leaderboard(123)[0]
         self.assertEqual((row['user_id'], row['points'], row['events'], row['contributions']), ('2', 4, 0, 1))
 
+    def test_personal_point_summary_includes_zero_and_isolates_user_and_server(self):
+        empty = dict(self.store.point_summary(123, 1))
+        self.assertEqual(empty, dict(points=0, events=0, contributions=0, event_points=0, contribution_points=0))
+        self.signup()
+        self.moderate(1, 'accepted')
+        self.store.add_contribution(123, 1, 5, 'Material', 99, 'summary-1')
+        self.store.add_contribution(123, 2, 20, 'Other user', 99, 'summary-2')
+        self.store.add_contribution(124, 1, 100, 'Other server', 99, 'summary-3')
+        self.assertEqual(dict(self.store.point_summary(123, 1)),
+                         dict(points=6, events=1, contributions=1, event_points=1, contribution_points=5))
+        self.store.respond(123, self.event_id, 1, 'Player', False)
+        self.assertEqual(dict(self.store.point_summary(123, 1)),
+                         dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5))
+
 
 class RaidUITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -394,3 +408,28 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(app_commands.CheckFailure):
             await command.callback(admin, target, 1, 'Material')
         self.assertEqual(self.service.store.leaderboard(123), [])
+
+    async def test_point_self_other_zero_and_no_admin_requirement(self):
+        command = self.bot.tree.get_command('point')
+        self.assertIsNone(command.default_permissions)
+        reader = self.interaction(uid=20)
+        reader.user.guild = SimpleNamespace(id=123)
+        await command.callback(reader)
+        self.assertIn('Total: **0 poin**', reader.response.send_message.call_args.args[0])
+        self.assertIn('<@20>', reader.response.send_message.call_args.args[0])
+        target = self.interaction(uid=30).user
+        target.guild = SimpleNamespace(id=123)
+        self.service.store.add_contribution(123, 30, 5, 'Material', 99, 'point-test')
+        await command.callback(reader, target)
+        text = reader.response.send_message.call_args.args[0]
+        self.assertIn('<@30>', text)
+        self.assertIn('Total: **5 poin**', text)
+        self.assertIn('Contribution: **1 contribution** · 5 poin', text)
+        self.assertTrue(reader.response.send_message.call_args.kwargs['ephemeral'])
+        self.assertFalse(reader.response.send_message.call_args.kwargs['allowed_mentions'].users)
+        target.guild.id = 124
+        with self.assertRaises(ValueError):
+            await command.callback(reader, target)
+        reader.guild_id = 124
+        with self.assertRaises(app_commands.CheckFailure):
+            await command.callback(reader)
