@@ -245,6 +245,70 @@ python -m unittest discover -p 'test_*.py' -v
 
 Tes memeriksa jadwal default dan timer hasil update, pembatalan pengingat lama, isolasi antar-index, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, respons `/trex`, antrean suara, pembatalan timer, izin voice, dan pembersihan koneksi/audio saat gagal. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
+## Raid manual: T-Rex, Rift, Savage
+
+Fitur raid terpisah dari timer T-Rex: semua event pendaftaran dibuat manual dan tidak berulang otomatis. `/trex` tetap untuk timer; `/trexraid` untuk pendaftaran. Event raid tidak menjadwalkan voice/pengingat tambahan.
+
+### Pengaturan Wispbyte
+
+1. Buat channel teks `#pendaftaran-raid` di server dan salin ID-nya. Bot tidak otomatis membuat channel.
+2. Buat/pilih role leader. Anggota dengan role ini boleh membuat dan mengelola event. Pembuat event juga menjadi leader event tersebut.
+3. Tambahkan variabel berikut di `.env` atau Startup yang aktif:
+
+```env
+RAID_CHANNEL_ID=ISI_ID_CHANNEL_PENDAFTARAN_RAID
+RAID_COMMAND_CHANNEL_ID=ISI_ID_CHANNEL_PENDAFTARAN_RAID
+RAID_LEADER_ROLE_ID=ISI_ID_ROLE_LEADER
+```
+
+`RAID_CHANNEL_ID` adalah tujuan kartu event dan tombol. `RAID_COMMAND_CHANNEL_ID` adalah tempat leader menjalankan perintah pembuatan event; boleh berbeda jika ingin channel notifikasi terpisah. Jika kosong, channel perintah mengikuti channel kartu, dan channel kartu mengikuti `CHANNEL_ID`. Role leader kosong mengikuti `ROLE_ID`; role `@everyone` tidak dianggap role leader. Pembuat event atau pemegang role leader dapat mengelola event. Izin Manage Server saja tidak menggantikan role leader.
+
+4. Beri bot View Channel, Send Messages, dan Embed Links pada channel kartu; izinkan anggota melihat channel dan memakai Application Commands. Kartu pertama menandai role `ROLE_ID` yang sudah dipakai notifikasi T-Rex. Pastikan role tersebut mentionable atau bot diizinkan mention role itu. Perubahan daftar tidak mengirim ping lagi.
+5. Perbarui kode termasuk **`raids.py` dan `raid_store.py`**, lalu restart. Tidak ada dependency baru. Dockerfile sudah menyertakan kedua modul baru. Pertahankan `.env`, `DB_PATH`, dan folder `data/`; tabel raid ditambahkan tanpa mengganti timer/receipt lama. Cadangkan database saat bot berhenti sebelum update.
+
+### Perintah
+
+```text
+/trexraid jam:18:00 tempat:Gurun index:3.1
+/rift jam:20:00 tempat:Pantai
+/savage jam:21:00 tempat:Savana
+/rift jam:00:10 tempat:Pantai tanggal:2026-11-03
+/raid
+/raid event:1
+/leaderboard
+/leaderboard halaman:2
+```
+
+Semua jam WIB. Tanggal default hari ini, dan jam yang sudah lewat ditolak (menit berjalan masih boleh). Untuk besok isi tanggal secara eksplisit. Pilih jam/tanggal mendatang saat mencoba contoh di atas. `/raid` menampilkan 10 event terbaru; `event` adalah nomor pada judul kartu, bukan ID pesan Discord. `/raid event:<nomor>` juga bisa digunakan jika kartu di channel gagal diperbarui atau terhapus.
+
+### Alur peserta dan leader
+
+- **Daftar:** masuk daftar Menunggu diterima; klik berulang tidak membuat entri/poin ganda. Peserta yang sudah diterima tetap diterima jika klik Daftar lagi.
+- **Tidak Hadir:** menyatakan tidak ikut atau membatalkan pendaftaran, termasuk yang sebelumnya diterima. Bisa memilih Daftar kembali, tetapi harus diterima ulang. Ini bukan check-in/konfirmasi hadir. Tidak ada tombol Absen.
+- **Kelola — Leader:** membuka panel privat. Pilih peserta dari menu, lalu **Terima** atau **Tolak**. Ada navigasi halaman untuk lebih dari 25 peserta. Nama dan status peserta terlihat pada kartu publik; panel memuat daftar lengkap.
+- Saat jam event dimulai, leader dapat memakai **Sahkan Hadir** untuk peserta diterima yang benar-benar ikut, atau **Tidak Datang** untuk yang tidak ikut. Status bisa dikoreksi sebelum event ditutup. Peserta yang sudah disahkan perlu meminta leader untuk koreksi, tidak bisa membatalkan sendiri.
+- **Selesaikan Event:** menampilkan konfirmasi jumlah peserta disahkan dan peserta diterima yang belum diverifikasi. Setelah dikonfirmasi, hanya peserta berstatus Hadir disahkan mendapat **1 poin**. Peserta diterima yang belum disahkan menjadi Tidak Datang. Pendaftar tertunda, ditolak, dan Tidak Hadir tidak mendapat poin. Tidak ada pengurangan poin.
+- **Batalkan Event:** konfirmasi pembatalan tanpa memberi poin, meskipun ada peserta yang sudah disahkan.
+
+Leader juga harus mendaftar dan disahkan jika ingin memperoleh poin; tidak ada bonus leader otomatis. Leader/role pengelola dipercaya memverifikasi kehadiran (termasuk dirinya sendiri). Discord tidak memverifikasi kehadiran di dalam game. Penutupan bersifat final pada versi awal: tidak ada fitur buka ulang/koreksi poin sesudah selesai. Jangan menyelesaikan sebelum daftar diperiksa.
+
+### Data dan restart
+
+`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu poin per anggota per event, dan penutupan beserta poin dilakukan dalam satu transaksi. `/leaderboard` menghitung total semua jenis raid untuk server ini, 10 anggota per halaman.
+
+Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online untuk memproses klik; saat offline Discord akan menampilkan kegagalan interaksi. Setelah bot aktif, coba klik kembali. Event tertutup tetap dapat dilihat dengan `/raid`, tetapi tidak menerima perubahan. Jika perubahan kartu gagal akibat izin/jaringan, data tetap tersimpan dan respons mengarahkan ke `/raid event:<nomor>`.
+
+### Mencoba versi awal
+
+1. Gunakan channel uji dan role leader milikmu, lalu buat `/rift` dengan jam WIB beberapa menit ke depan.
+2. Dari akun peserta, coba **Daftar**, lalu **Tidak Hadir**, lalu **Daftar** lagi.
+3. Leader membuka Kelola, memilih peserta, dan klik Terima. Pastikan leaderboard belum bertambah.
+4. Restart bot selagi event terbuka dan coba tombol/panel lagi.
+5. Setelah jam event, leader Sahkan Hadir lalu Selesaikan Event dan konfirmasi. Periksa `/leaderboard`: satu poin per peserta disahkan.
+6. Untuk uji tanpa memberi poin, gunakan Batalkan Event. Data/poin uji yang sudah diselesaikan tidak memiliki tombol reset pada versi awal.
+
+Tes otomatis mencakup alur tombol, pemulihan setelah restart, izin lintas role/server, pembatalan, leaderboard, isolasi data timer lama, dan penutupan berulang tanpa poin ganda. Pengujian Discord langsung memerlukan bot berjalan dengan konfigurasi server milikmu.
+
 ## Referensi
 
 - https://discordpy.readthedocs.io/en/stable/ext/tasks/index.html
