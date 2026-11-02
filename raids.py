@@ -25,14 +25,16 @@ def event_embed(event, participants):
                          f"**Tempat:** {discord.utils.escape_markdown(discord.utils.escape_mentions(event['place']))}\n"
                          f"**Leader:** <@{event['leader_id']}>\n"
                          f"**Status:** {EVENT_STATUSES[event['status']]}\n"
-                         '**Poin:** 1 per peserta yang disahkan, saat event diselesaikan.')
+                         '**Poin:** langsung +1 saat leader menerima peserta.')
+    if event['status'] == 'cancelled':
+        embed.description = embed.description.replace('langsung +1 saat leader menerima peserta.', 'dibatalkan untuk seluruh peserta event ini.')
     for status, label in STATUSES.items():
         users = [p for p in participants if p['status'] == status]
         value = ', '.join(f"<@{p['user_id']}>" for p in users[:12]) or '—'
         if len(users) > 12:
             value += f' · +{len(users) - 12} lainnya (lihat panel leader)'
         embed.add_field(name=f'{label} ({len(users)})', value=value, inline=False)
-    embed.set_footer(text='Daftar = mengajukan ikut. Tidak Hadir = tidak ikut/batal. Leader memverifikasi setelah raid.')
+    embed.set_footer(text='Daftar → leader Terima → +1 poin. Tidak Hadir membatalkan poin selama event terbuka.')
     return embed
 
 
@@ -79,9 +81,7 @@ class LeaderView(discord.ui.View):
             self.add_item(select)
         for action, label, style in (
             ('accepted', 'Terima', discord.ButtonStyle.success),
-            ('rejected', 'Tolak', discord.ButtonStyle.secondary),
-            ('attended', 'Sahkan Hadir', discord.ButtonStyle.primary),
-            ('no_show', 'Tidak Datang', discord.ButtonStyle.danger),
+            ('absent', 'Tidak Hadir', discord.ButtonStyle.danger),
         ):
             button = discord.ui.Button(label=label, style=style, row=1, disabled=not subset)
 
@@ -110,12 +110,10 @@ class LeaderView(discord.ui.View):
                 if event['status'] != 'open':
                     raise ValueError('Event sudah ditutup.')
                 people = self.service.store.participants(self.event_id)
-                verified = sum(p['status'] == 'attended' for p in people)
-                unverified = sum(p['status'] == 'accepted' for p in people)
-                text = ('Batalkan event tanpa memberikan poin?' if cancel else
-                        f'Selesaikan event? {verified} peserta yang disahkan masing-masing mendapat 1 poin. '
-                        f'{unverified} peserta diterima yang belum disahkan akan ditandai Tidak Datang. '
-                        'Pastikan daftar benar; event yang ditutup tidak bisa diedit pada versi ini.')
+                accepted = sum(p['status'] == 'accepted' for p in people)
+                text = ('Batalkan event? Semua poin event ini akan ditarik.' if cancel else
+                        f'Tutup event? Poin {accepted} peserta yang diterima sudah tercatat, '
+                        'tidak akan ditambahkan lagi. Pastikan daftar benar; event tertutup tidak bisa diedit.')
                 await interaction.response.send_message(text, ephemeral=True,
                     view=ConfirmView(self.service, self.event_id, self.owner_id, cancel))
             button.callback = close_event
@@ -163,6 +161,7 @@ class RaidService:
             raise ValueError('ID konfigurasi raid harus ID Discord positif atau kosong.')
         self.store = RaidStore(db_path)
         self.lock = asyncio.Lock()
+        self._cards_refreshed = False
         self.register_commands()
 
     def require_guild(self, interaction):
@@ -209,6 +208,15 @@ class RaidService:
         except (discord.HTTPException, ValueError) as exc:
             log.warning('Raid #%s tersimpan tetapi kartu gagal diperbarui: %s', event_id, exc)
             return f' Data tersimpan, tetapi kartu gagal diperbarui. Gunakan /raid event:{event_id} untuk melihat data terbaru.'
+
+    async def refresh_open_cards(self):
+        # Update existing cards to the current display after restoring their buttons.
+        if self._cards_refreshed:
+            return
+        self._cards_refreshed = True
+        async with self.lock:
+            for event in self.store.open_events(self.guild_id):
+                await self.refresh_notice(event['id'])
 
     async def create_event(self, interaction, kind, jam, tempat, tanggal=None, index=None):
         self.require_guild(interaction)
@@ -257,7 +265,8 @@ class RaidService:
             status = self.store.respond(self.guild_id, event_id, interaction.user.id,
                                        interaction.user.display_name, action == 'join')
             warning = await self.refresh_notice(event_id)
-        await interaction.followup.send(f'Status kamu: **{STATUSES[status]}**. Belum ada poin diberikan.' + warning,
+        points = '1 poin sudah tercatat.' if status == 'accepted' else 'Tidak ada poin untuk event ini.'
+        await interaction.followup.send(f'Status kamu: **{STATUSES[status]}**. {points}' + warning,
                                         ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def moderate(self, interaction, event_id, user_id, action, page=0):
@@ -266,7 +275,8 @@ class RaidService:
         async with self.lock:
             self.store.moderate(self.guild_id, event_id, user_id, interaction.user.id, action)
             warning = await self.refresh_notice(event_id)
-        await interaction.edit_original_response(content=f'Peserta <@{user_id}>: {STATUSES[action]}.' + warning,
+        points = '1 poin sudah tercatat (maksimal 1 per event).' if action == 'accepted' else 'Poin event ini dibatalkan jika sebelumnya diterima.'
+        await interaction.edit_original_response(content=f'Peserta <@{user_id}>: {STATUSES[action]}. {points}' + warning,
             view=LeaderView(self, event_id, interaction.user.id, page), allowed_mentions=discord.AllowedMentions.none())
 
     async def finish(self, interaction, event_id, cancel):
@@ -275,7 +285,7 @@ class RaidService:
         async with self.lock:
             count = self.store.finish(self.guild_id, event_id, interaction.user.id, cancel)
             warning = await self.refresh_notice(event_id)
-        text = 'Event dibatalkan. Tidak ada poin diberikan.' if cancel else f'Event selesai. {count} peserta masing-masing mendapat 1 poin.'
+        text = 'Event dibatalkan. Semua poin event ini ditarik.' if cancel else f'Event ditutup. {count} peserta masing-masing memiliki 1 poin; tidak ada poin tambahan.'
         await interaction.followup.send(text + warning, ephemeral=True)
 
     def register_commands(self):
@@ -335,7 +345,7 @@ class RaidService:
             if not 1 <= halaman <= 10000:
                 raise ValueError('Halaman harus 1–10000.')
             rows = self.store.leaderboard(self.guild_id, halaman - 1)
-            lines = [f'🏆 **Leaderboard Raid — halaman {halaman}**', '1 poin per event yang disahkan dan diselesaikan.']
+            lines = [f'🏆 **Leaderboard Raid — halaman {halaman}**', '1 poin langsung saat diterima leader; maksimal 1 per event.']
             for i, row in enumerate(rows, (halaman - 1) * 10 + 1):
                 lines.append(f"{i}. <@{row['user_id']}> — **{row['points']} poin** · {row['events']} event")
             if not rows:

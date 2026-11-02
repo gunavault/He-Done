@@ -200,6 +200,7 @@ class TrexBot(discord.Client):
         else:
             log.info('Tujuan siap: guild_id=%s channel_id=%s role_id=%s',
                      channel.guild.id, channel.id, role.id)
+        await self.raids.refresh_open_cards()
 
     async def destination(self):
         guild = self.get_guild(self.guild_id)

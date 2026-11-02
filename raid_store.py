@@ -8,8 +8,7 @@ from schedule import WIB, parse_time, SUPPORTED_INDICES
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
 STATUSES = {
     'pending': 'Menunggu diterima', 'accepted': 'Diterima',
-    'absent': 'Tidak Hadir', 'rejected': 'Ditolak',
-    'attended': 'Hadir disahkan', 'no_show': 'Tidak datang',
+    'absent': 'Tidak Hadir',
 }
 
 
@@ -64,6 +63,19 @@ class RaidStore:
             CREATE INDEX IF NOT EXISTS raid_events_guild ON raid_events(guild_id, status);
             CREATE INDEX IF NOT EXISTS raid_points_guild ON raid_points(guild_id, user_id);
         ''')
+        # Upgrade older six-status raids and reconcile one point per accepted member.
+        # Idempotent: restarting never adds a second point for an event/user pair.
+        with self.db:
+            self.db.execute("UPDATE raid_participants SET status='accepted' WHERE status='attended'")
+            self.db.execute("UPDATE raid_participants SET status='absent' WHERE status IN ('no_show','rejected')")
+            self.db.execute('''DELETE FROM raid_points WHERE NOT EXISTS (
+                SELECT 1 FROM raid_participants p JOIN raid_events e ON e.id=p.event_id
+                WHERE p.event_id=raid_points.event_id AND p.user_id=raid_points.user_id
+                AND p.status='accepted' AND e.status IN ('open','completed'))''')
+            self.db.execute('''INSERT OR IGNORE INTO raid_points
+                SELECT e.id,e.guild_id,p.user_id,1,p.updated_at
+                FROM raid_participants p JOIN raid_events e ON e.id=p.event_id
+                WHERE p.status='accepted' AND e.status IN ('open','completed')''')
 
     def event(self, guild_id, event_id):
         row = self.db.execute('SELECT * FROM raid_events WHERE id=? AND guild_id=?',
@@ -123,11 +135,10 @@ class RaidStore:
 
     def respond(self, guild_id, event_id, user_id, name, attending):
         with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
             self._open(guild_id, event_id)
             old = self.db.execute('SELECT status FROM raid_participants WHERE event_id=? AND user_id=?',
                                   (event_id, str(user_id))).fetchone()
-            if old and old['status'] == 'attended':
-                raise ValueError('Kehadiran sudah disahkan. Hubungi leader untuk koreksi.')
             if attending and old and old['status'] == 'accepted':
                 return 'accepted'
             status = 'pending' if attending else 'absent'
@@ -135,43 +146,43 @@ class RaidStore:
                 ON CONFLICT(event_id,user_id) DO UPDATE SET name=excluded.name,
                 status=excluded.status,updated_at=excluded.updated_at,verified_by=NULL''',
                 (event_id, str(user_id), name[:100], status, datetime.now(WIB).isoformat()))
+            self.db.execute('DELETE FROM raid_points WHERE event_id=? AND user_id=?',
+                            (event_id, str(user_id)))
             self._audit(event_id, user_id, status, user_id)
         return status
 
     def moderate(self, guild_id, event_id, user_id, actor_id, action, now=None):
-        allowed = {'accepted': {'pending', 'rejected'},
-                   'rejected': {'pending', 'accepted', 'attended', 'no_show'},
-                   'attended': {'accepted', 'no_show'},
-                   'no_show': {'accepted', 'attended'}}
+        allowed = {'accepted': {'pending', 'accepted'},
+                   'absent': {'pending', 'accepted', 'absent'}}
         with self.db:
-            event = self._open(guild_id, event_id)
+            self.db.execute('BEGIN IMMEDIATE')
+            self._open(guild_id, event_id)
             row = self.db.execute('SELECT status FROM raid_participants WHERE event_id=? AND user_id=?',
                                   (event_id, str(user_id))).fetchone()
             if action not in allowed or row is None or row['status'] not in allowed[action]:
                 raise ValueError('Status peserta sudah berubah atau tidak cocok. Muat ulang panel leader.')
-            if action in ('attended', 'no_show') and (now or datetime.now(WIB)) < datetime.fromisoformat(event['starts_at']):
-                raise ValueError('Verifikasi kehadiran baru tersedia saat jam event dimulai.')
             self.db.execute('''UPDATE raid_participants SET status=?,verified_by=?,updated_at=?
                 WHERE event_id=? AND user_id=?''', (action, str(actor_id), datetime.now(WIB).isoformat(), event_id, str(user_id)))
+            if action == 'accepted':
+                self.db.execute('INSERT OR IGNORE INTO raid_points VALUES(?,?,?,1,?)',
+                                (event_id, str(guild_id), str(user_id), datetime.now(WIB).isoformat()))
+            else:
+                self.db.execute('DELETE FROM raid_points WHERE event_id=? AND user_id=?',
+                                (event_id, str(user_id)))
             self._audit(event_id, actor_id, action, user_id)
 
     def finish(self, guild_id, event_id, actor_id, cancel=False, now=None):
         now = now or datetime.now(WIB)
-        # One transaction serializes closure and awards, including across process connections.
+        # Closing keeps existing points. Cancelling reverses all awards atomically.
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
             event = self._open(guild_id, event_id)
             if not cancel and now < datetime.fromisoformat(event['starts_at']):
                 raise ValueError('Event baru bisa diselesaikan setelah jam mulainya.')
-            count = 0
-            if not cancel:
-                rows = self.db.execute("SELECT user_id FROM raid_participants WHERE event_id=? AND status='attended'", (event_id,)).fetchall()
-                for row in rows:
-                    self.db.execute('INSERT INTO raid_points VALUES(?,?,?,1,?)',
-                                    (event_id, str(guild_id), row['user_id'], now.isoformat()))
-                count = len(rows)
-                self.db.execute("UPDATE raid_participants SET status='no_show',updated_at=? WHERE event_id=? AND status='accepted'",
-                                (now.isoformat(), event_id))
+            count = self.db.execute('SELECT COUNT(*) FROM raid_points WHERE event_id=?', (event_id,)).fetchone()[0]
+            if cancel:
+                self.db.execute('DELETE FROM raid_points WHERE event_id=?', (event_id,))
+                count = 0
             status = 'cancelled' if cancel else 'completed'
             self.db.execute('UPDATE raid_events SET status=?,closed_at=?,closed_by=? WHERE id=?',
                             (status, now.isoformat(), str(actor_id), event_id))

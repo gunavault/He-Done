@@ -36,7 +36,7 @@ class RaidStoreTests(unittest.TestCase):
     def moderate(self, uid, status, now=NOW):
         self.store.moderate(123, self.event_id, uid, 789, status, now)
 
-    def test_signup_duplicate_absent_rejoin_and_accept_are_not_points(self):
+    def test_signup_duplicate_absent_rejoin_needs_fresh_accept(self):
         self.signup()
         self.signup()
         self.assertEqual(len(self.store.participants(self.event_id)), 1)
@@ -48,18 +48,18 @@ class RaidStoreTests(unittest.TestCase):
         self.assertEqual(self.store.participants(self.event_id)[0]['status'], 'pending')
         self.assertEqual(self.store.leaderboard(123), [])
 
-    def test_only_verified_participants_awarded_once_and_survive_restart(self):
+    def test_accepted_awarded_immediately_once_and_survive_restart(self):
         for uid in range(1, 7):
             self.signup(uid)
         for uid in (1, 2, 3):
             self.moderate(uid, 'accepted')
-        self.moderate(1, 'attended')
-        self.moderate(3, 'no_show')
+        self.assertEqual(len(self.store.leaderboard(123)), 3)
+        self.moderate(1, 'accepted')
+        self.moderate(3, 'absent')
         self.store.respond(123, self.event_id, 4, 'P4', False)
-        self.moderate(5, 'rejected')
-        self.assertEqual(self.store.finish(123, self.event_id, 789, now=NOW), 1)
-        self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 1)])
-        self.assertEqual(self.store.participants(self.event_id)[1]['status'], 'no_show')
+        self.moderate(5, 'absent')
+        self.assertEqual(self.store.finish(123, self.event_id, 789, now=NOW), 2)
+        self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 1), ('2', 1)])
         self.store.close()
         self.store = RaidStore(self.path)
         with self.assertRaises(ValueError):
@@ -72,43 +72,55 @@ class RaidStoreTests(unittest.TestCase):
     def test_different_event_each_gives_one_point_and_guilds_are_isolated(self):
         self.signup()
         self.moderate(1, 'accepted')
-        self.moderate(1, 'attended')
         self.store.finish(123, self.event_id, 789, now=NOW)
         other = self.store.create(123, 456, 789, 'rift', NOW, 'Pantai')
         self.store.publish(123, other, 1000)
         self.store.respond(123, other, 1, 'Player', True)
         self.store.moderate(123, other, 1, 789, 'accepted', NOW)
-        self.store.moderate(123, other, 1, 789, 'attended', NOW)
         self.store.finish(123, other, 789, now=NOW)
         self.assertEqual(self.store.leaderboard(123)[0]['points'], 2)
         self.assertEqual(self.store.leaderboard(124), [])
         with self.assertRaises(ValueError):
             self.store.respond(124, other, 2, 'Other guild', True)
 
-    def test_cancel_event_never_awards_even_verified(self):
+    def test_cancel_event_reverses_accepted_points(self):
         self.signup()
         self.moderate(1, 'accepted')
-        self.moderate(1, 'attended')
         self.store.finish(123, self.event_id, 789, cancel=True, now=NOW)
         self.assertEqual(self.store.event(123, self.event_id)['status'], 'cancelled')
         self.assertEqual(self.store.leaderboard(123), [])
 
-    def test_verification_requires_accept_and_start_and_can_be_corrected(self):
+    def test_accept_before_start_absence_reverses_points_and_rejoin_needs_accept(self):
         self.signup()
+        self.moderate(1, 'accepted', NOW - timedelta(minutes=1))
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 1)
+        self.store.respond(123, self.event_id, 1, 'Player', False)
+        self.assertEqual(self.store.leaderboard(123), [])
         with self.assertRaises(ValueError):
-            self.moderate(1, 'attended')
+            self.moderate(1, 'accepted')
+        self.signup()
+        self.assertEqual(self.store.leaderboard(123), [])
         self.moderate(1, 'accepted')
-        with self.assertRaisesRegex(ValueError, 'jam event'):
-            self.moderate(1, 'attended', NOW - timedelta(minutes=1))
-        with self.assertRaises(ValueError):
-            self.store.finish(123, self.event_id, 789, now=NOW - timedelta(minutes=1))
-        self.moderate(1, 'attended')
-        with self.assertRaisesRegex(ValueError, 'disahkan'):
-            self.store.respond(123, self.event_id, 1, 'Player', False)
-        self.moderate(1, 'no_show')
-        self.moderate(1, 'attended')
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 1)
+        self.moderate(1, 'absent')
+        self.assertEqual(self.store.leaderboard(123), [])
         self.assertEqual(self.store.participants(self.event_id)[0]['verified_by'], '789')
-        self.assertTrue(self.store.db.execute('SELECT 1 FROM raid_audit WHERE action=?', ('attended',)).fetchone())
+
+    def test_upgrade_legacy_statuses_and_existing_accepted_points_is_idempotent(self):
+        for uid in (1, 2, 3, 4):
+            self.signup(uid)
+        with self.store.db:
+            for uid, status in ((1, 'attended'), (2, 'accepted'), (3, 'rejected'), (4, 'no_show')):
+                self.store.db.execute('UPDATE raid_participants SET status=? WHERE event_id=? AND user_id=?',
+                                      (status, self.event_id, str(uid)))
+            self.store.db.execute('INSERT INTO raid_points VALUES(?,?,?,1,?)',
+                                 (self.event_id, '123', '1', NOW.isoformat()))
+        for _ in range(2):
+            self.store.close()
+            self.store = RaidStore(self.path)
+            self.assertEqual([p['status'] for p in self.store.participants(self.event_id)],
+                             ['accepted', 'accepted', 'absent', 'absent'])
+            self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 1), ('2', 1)])
 
     def test_existing_timers_and_receipts_preserved_in_same_database(self):
         timers = Store(self.path)
@@ -124,7 +136,6 @@ class RaidStoreTests(unittest.TestCase):
     def test_second_connection_cannot_award_again(self):
         self.signup()
         self.moderate(1, 'accepted')
-        self.moderate(1, 'attended')
         second = RaidStore(self.path)
         self.store.finish(123, self.event_id, 789, now=NOW)
         try:
@@ -246,6 +257,11 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.store.participants(self.event_id)[0]['status'], 'pending')
         self.assertIn('Data tersimpan', i.followup.send.call_args.args[0])
 
+    async def test_startup_refreshes_existing_card_once(self):
+        await self.service.refresh_open_cards()
+        await self.service.refresh_open_cards()
+        self.service.refresh.assert_awaited_once_with(self.event_id)
+
     async def test_pagination_handles_more_than_25_participants(self):
         for uid in range(100, 156):
             self.service.store.respond(123, self.event_id, uid, 'Player', True)
@@ -261,7 +277,6 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
     async def test_finalize_via_confirmation_and_closed_buttons(self):
         self.service.store.respond(123, self.event_id, 20, 'P20', True)
         self.service.store.moderate(123, self.event_id, 20, 10, 'accepted', NOW)
-        self.service.store.moderate(123, self.event_id, 20, 10, 'attended', NOW)
         view = ConfirmView(self.service, self.event_id, 10, False)
         with patch('raid_store.datetime') as clock:
             clock.now.return_value = NOW
@@ -272,15 +287,18 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await self.service.handle_public(self.interaction(), self.event_id, 'join')
 
-    async def test_accept_and_verify_through_leader_panel_actions(self):
+    async def test_accept_immediately_gives_point_and_panel_has_two_actions(self):
         self.service.store.respond(123, self.event_id, 20, 'P20', True)
         i = self.interaction(uid=10)
         await self.service.moderate(i, self.event_id, 20, 'accepted')
         self.assertEqual(self.service.store.participants(self.event_id)[0]['status'], 'accepted')
-        # Existing fixture event time may be in the future relative to the host clock.
-        with patch('raid_store.datetime') as clock:
-            clock.now.return_value = NOW
-            clock.fromisoformat.side_effect = datetime.fromisoformat
-            await self.service.moderate(i, self.event_id, 20, 'attended')
-        self.assertEqual(self.service.store.participants(self.event_id)[0]['status'], 'attended')
+        self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 1)
+        panel = LeaderView(self.service, self.event_id, 10)
+        actions = [b.label for b in panel.children if isinstance(b, discord.ui.Button)]
+        self.assertIn('Terima', actions)
+        self.assertIn('Tidak Hadir', actions)
+        self.assertNotIn('Sahkan Hadir', actions)
+        embed = event_embed(self.service.store.event(123, self.event_id), self.service.store.participants(self.event_id))
+        self.assertEqual([f.name for f in embed.fields], ['Menunggu diterima (0)', 'Diterima (1)', 'Tidak Hadir (0)'])
+        await self.service.moderate(i, self.event_id, 20, 'absent')
         self.assertEqual(self.service.store.leaderboard(123), [])
