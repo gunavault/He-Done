@@ -402,7 +402,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commands_and_role_mention_scope(self):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()},
-                         {'trex', 'jadwal', 'tes', 'tesvoice', 'trexraid', 'rift', 'savage', 'raid', 'leaderboard'})
+                         {'trex', 'jadwal', 'tes', 'tesvoice', 'trexraid', 'rift', 'savage', 'raid', 'leaderboard', 'addpoint'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()
         role = type('FakeRole', (), {'id': 789, 'mention': '<@&789>'})()

@@ -152,6 +152,36 @@ class RaidStoreTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 raid_time(jam, day, NOW)
 
+    def test_contributions_total_count_replay_and_restart(self):
+        self.signup()
+        self.moderate(1, 'accepted')
+        receipt = self.store.add_contribution(123, 1, 5, 'Membantu material', 99, 'interaction-1')
+        self.assertEqual(receipt, self.store.add_contribution(123, 1, 5, 'Membantu material', 99, 'interaction-1'))
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (6, 1, 1))
+        self.store.add_contribution(123, 1, 2, 'Membantu transport', 99, 'interaction-2')
+        self.store.add_contribution(124, 1, 100, 'Other server', 99, 'interaction-3')
+        self.store.close()
+        self.store = RaidStore(self.path)
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (8, 1, 2))
+        detail = self.store.db.execute('SELECT * FROM raid_contributions WHERE id=?', (receipt,)).fetchone()
+        self.assertEqual((detail['detail'], detail['actor_id']), ('Membantu material', '99'))
+        # Cancelling a raid must never delete an independent contribution.
+        self.store.finish(123, self.event_id, 789, cancel=True, now=NOW)
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (7, 0, 2))
+
+    def test_contribution_validation_and_interaction_collision(self):
+        for points, detail in ((0, 'a'), (-1, 'a'), (1.5, 'a'), (True, 'a'), (1000001, 'a'), (1, '  '), (1, 'x' * 501)):
+            with self.assertRaises(ValueError):
+                self.store.add_contribution(123, 1, points, detail, 99, 'bad')
+        self.store.add_contribution(123, 2, 4, 'Valid', 99, 'valid')
+        with self.assertRaises(ValueError):
+            self.store.add_contribution(123, 2, 10, 'Different', 99, 'valid')
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['user_id'], row['points'], row['events'], row['contributions']), ('2', 4, 0, 1))
+
 
 class RaidUITests(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self):
@@ -176,6 +206,7 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         user = MagicMock(spec=discord.Member)
         user.id, user.bot, user.display_name = uid, False, f'Player {uid}'
         user.roles = [SimpleNamespace(id=777)] if role else []
+        user.guild_permissions = SimpleNamespace(administrator=False, manage_guild=False)
         i = SimpleNamespace(user=user, guild_id=guild, channel_id=556,
                             response=SimpleNamespace(defer=AsyncMock(), send_message=AsyncMock(),
                                                      edit_message=AsyncMock(), is_done=Mock(return_value=False)),
@@ -295,10 +326,71 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 1)
         panel = LeaderView(self.service, self.event_id, 10)
         actions = [b.label for b in panel.children if isinstance(b, discord.ui.Button)]
-        self.assertIn('Terima', actions)
+        self.assertIn('Hadir', actions)
         self.assertIn('Tidak Hadir', actions)
         self.assertNotIn('Sahkan Hadir', actions)
         embed = event_embed(self.service.store.event(123, self.event_id), self.service.store.participants(self.event_id))
-        self.assertEqual([f.name for f in embed.fields], ['Menunggu diterima (0)', 'Diterima (1)', 'Tidak Hadir (0)'])
+        self.assertEqual([f.name for f in embed.fields], ['Menunggu diterima (0)', 'Hadir (1)', 'Tidak Hadir (0)'])
         await self.service.moderate(i, self.event_id, 20, 'absent')
+        self.assertEqual(self.service.store.leaderboard(123), [])
+
+    async def test_addpoint_requires_discord_administrator_not_manage_server_or_role(self):
+        command = self.bot.tree.get_command('addpoint')
+        target = self.interaction(uid=30).user
+        target.guild = SimpleNamespace(id=123)
+        for i in (self.interaction(), self.interaction(role=True), self.interaction(uid=10)):
+            i.user.guild_permissions = SimpleNamespace(administrator=False, manage_guild=True)
+            with self.assertRaises(app_commands.CheckFailure):
+                await command.callback(i, target, 5, 'Material')
+        allowed = self.interaction()
+        allowed.user.roles = []
+        allowed.user.guild_permissions = SimpleNamespace(administrator=True, manage_guild=True)
+        self.service.require_admin(allowed)
+        self.assertTrue(command.default_permissions.administrator)
+        with self.assertRaises(app_commands.CheckFailure):
+            self.service.require_manager(allowed, self.service.store.event(123, self.event_id))
+        self.assertEqual(self.service.store.leaderboard(123), [])
+
+    async def test_addpoint_receipt_replay_and_example_leaderboard(self):
+        admin = self.interaction()
+        admin.id = 7654
+        admin.user.guild_permissions = SimpleNamespace(administrator=True, manage_guild=True)
+        target = self.interaction(uid=30).user
+        target.guild = SimpleNamespace(id=123)
+        for event_id in (self.event_id,
+                         self.service.store.create(123, 555, 10, 'rift', NOW, 'P'),
+                         self.service.store.create(123, 555, 10, 'savage', NOW, 'P')):
+            self.service.store.publish(123, event_id, 999 + event_id)
+            self.service.store.respond(123, event_id, 30, 'C. Ago', True)
+            self.service.store.moderate(123, event_id, 30, 10, 'accepted')
+        command = self.bot.tree.get_command('addpoint')
+        for _ in range(2):
+            await command.callback(admin, target, 5, 'Material @everyone')
+        row = self.service.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (8, 3, 1))
+        self.assertTrue(admin.followup.send.call_args.kwargs['ephemeral'])
+        self.assertFalse(admin.followup.send.call_args.kwargs['allowed_mentions'].everyone)
+        reader = self.interaction()
+        await self.bot.tree.get_command('leaderboard').callback(reader)
+        self.assertIn('1. **<@30>** — **8 poin** · 3 event, 1 contribution', reader.response.send_message.call_args.args[0])
+
+    async def test_addpoint_rejects_bot_wrong_guild_and_blank_detail(self):
+        admin = self.interaction()
+        admin.id = 9876
+        admin.user.guild_permissions = SimpleNamespace(administrator=True, manage_guild=True)
+        target = self.interaction(uid=30).user
+        command = self.bot.tree.get_command('addpoint')
+        target.guild = SimpleNamespace(id=124)
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 1, 'Material')
+        target.guild.id = 123
+        target.bot = True
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 1, 'Material')
+        target.bot = False
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 1, '   ')
+        admin.guild_id = 124
+        with self.assertRaises(app_commands.CheckFailure):
+            await command.callback(admin, target, 1, 'Material')
         self.assertEqual(self.service.store.leaderboard(123), [])

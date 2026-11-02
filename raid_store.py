@@ -7,7 +7,7 @@ from schedule import WIB, parse_time, SUPPORTED_INDICES
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
 STATUSES = {
-    'pending': 'Menunggu diterima', 'accepted': 'Diterima',
+    'pending': 'Menunggu diterima', 'accepted': 'Hadir',
     'absent': 'Tidak Hadir',
 }
 
@@ -62,6 +62,13 @@ class RaidStore:
             );
             CREATE INDEX IF NOT EXISTS raid_events_guild ON raid_events(guild_id, status);
             CREATE INDEX IF NOT EXISTS raid_points_guild ON raid_points(guild_id, user_id);
+            CREATE TABLE IF NOT EXISTS raid_contributions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interaction_id TEXT NOT NULL UNIQUE, guild_id TEXT NOT NULL,
+                user_id TEXT NOT NULL, points INTEGER NOT NULL CHECK (points>0),
+                detail TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS raid_contributions_guild ON raid_contributions(guild_id,user_id);
         ''')
         # Upgrade older six-status raids and reconcile one point per accepted member.
         # Idempotent: restarting never adds a second point for an event/user pair.
@@ -189,10 +196,35 @@ class RaidStore:
             self._audit(event_id, actor_id, status)
         return count
 
+    def add_contribution(self, guild_id, user_id, points, detail, actor_id, interaction_id):
+        if type(points) is not int or not 1 <= points <= 1000000:
+            raise ValueError('Point harus bilangan bulat 1–1000000.')
+        detail = detail.strip()
+        if not 1 <= len(detail) <= 500:
+            raise ValueError('Detail kontribusi harus 1–500 karakter.')
+        values = (str(interaction_id), str(guild_id), str(user_id), points, detail, str(actor_id))
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            old = self.db.execute('SELECT * FROM raid_contributions WHERE interaction_id=?',
+                                  (str(interaction_id),)).fetchone()
+            if old:
+                if tuple(old[k] for k in ('interaction_id', 'guild_id', 'user_id', 'points', 'detail', 'actor_id')) != values:
+                    raise ValueError('Permintaan kontribusi sudah dipakai untuk data berbeda.')
+                return old['id']
+            cur = self.db.execute('''INSERT INTO raid_contributions
+                (interaction_id,guild_id,user_id,points,detail,actor_id,created_at)
+                VALUES(?,?,?,?,?,?,?)''', (*values, datetime.now(WIB).isoformat()))
+            return cur.lastrowid
+
     def leaderboard(self, guild_id, page=0):
-        return self.db.execute('''SELECT user_id,SUM(points) AS points,COUNT(*) AS events
-            FROM raid_points WHERE guild_id=? GROUP BY user_id
-            ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''', (str(guild_id), page * 10)).fetchall()
+        return self.db.execute('''SELECT user_id,SUM(points) AS points,
+                SUM(events) AS events,SUM(contributions) AS contributions
+            FROM (
+                SELECT user_id,points,1 AS events,0 AS contributions FROM raid_points WHERE guild_id=?
+                UNION ALL
+                SELECT user_id,points,0 AS events,1 AS contributions FROM raid_contributions WHERE guild_id=?
+            ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
+            (str(guild_id), str(guild_id), page * 10)).fetchall()
 
     def close(self):
         self.db.close()

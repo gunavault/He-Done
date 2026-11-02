@@ -25,16 +25,16 @@ def event_embed(event, participants):
                          f"**Tempat:** {discord.utils.escape_markdown(discord.utils.escape_mentions(event['place']))}\n"
                          f"**Leader:** <@{event['leader_id']}>\n"
                          f"**Status:** {EVENT_STATUSES[event['status']]}\n"
-                         '**Poin:** langsung +1 saat leader menerima peserta.')
+                         '**Poin:** langsung +1 saat leader menandai Hadir.')
     if event['status'] == 'cancelled':
-        embed.description = embed.description.replace('langsung +1 saat leader menerima peserta.', 'dibatalkan untuk seluruh peserta event ini.')
+        embed.description = embed.description.replace('langsung +1 saat leader menandai Hadir.', 'dibatalkan untuk seluruh peserta event ini.')
     for status, label in STATUSES.items():
         users = [p for p in participants if p['status'] == status]
         value = ', '.join(f"<@{p['user_id']}>" for p in users[:12]) or '—'
         if len(users) > 12:
             value += f' · +{len(users) - 12} lainnya (lihat panel leader)'
         embed.add_field(name=f'{label} ({len(users)})', value=value, inline=False)
-    embed.set_footer(text='Daftar → leader Terima → +1 poin. Tidak Hadir membatalkan poin selama event terbuka.')
+    embed.set_footer(text='Daftar → leader Hadir → +1 poin. Tidak Hadir membatalkan poin selama event terbuka.')
     return embed
 
 
@@ -80,7 +80,7 @@ class LeaderView(discord.ui.View):
             select.callback = choose
             self.add_item(select)
         for action, label, style in (
-            ('accepted', 'Terima', discord.ButtonStyle.success),
+            ('accepted', 'Hadir', discord.ButtonStyle.success),
             ('absent', 'Tidak Hadir', discord.ButtonStyle.danger),
         ):
             button = discord.ui.Button(label=label, style=style, row=1, disabled=not subset)
@@ -112,7 +112,7 @@ class LeaderView(discord.ui.View):
                 people = self.service.store.participants(self.event_id)
                 accepted = sum(p['status'] == 'accepted' for p in people)
                 text = ('Batalkan event? Semua poin event ini akan ditarik.' if cancel else
-                        f'Tutup event? Poin {accepted} peserta yang diterima sudah tercatat, '
+                        f'Tutup event? Poin {accepted} peserta Hadir sudah tercatat, '
                         'tidak akan ditambahkan lagi. Pastikan daftar benar; event tertutup tidak bisa diedit.')
                 await interaction.response.send_message(text, ephemeral=True,
                     view=ConfirmView(self.service, self.event_id, self.owner_id, cancel))
@@ -176,6 +176,12 @@ class RaidService:
         self.require_guild(interaction)
         if str(interaction.user.id) != event['leader_id'] and not self.is_leader_role(interaction.user):
             raise app_commands.CheckFailure('Hanya leader event atau pemegang RAID_LEADER_ROLE_ID yang dapat mengelola.')
+
+    def require_admin(self, interaction):
+        self.require_guild(interaction)
+        if (not isinstance(interaction.user, discord.Member)
+                or not interaction.user.guild_permissions.administrator):
+            raise app_commands.CheckFailure('Perintah ini memerlukan izin Administrator pada server Discord.')
 
     async def error(self, interaction, error):
         await self.bot.command_error(interaction, error)
@@ -275,7 +281,7 @@ class RaidService:
         async with self.lock:
             self.store.moderate(self.guild_id, event_id, user_id, interaction.user.id, action)
             warning = await self.refresh_notice(event_id)
-        points = '1 poin sudah tercatat (maksimal 1 per event).' if action == 'accepted' else 'Poin event ini dibatalkan jika sebelumnya diterima.'
+        points = '1 poin sudah tercatat (maksimal 1 per event).' if action == 'accepted' else 'Poin event ini dibatalkan jika sebelumnya Hadir.'
         await interaction.edit_original_response(content=f'Peserta <@{user_id}>: {STATUSES[action]}. {points}' + warning,
             view=LeaderView(self, event_id, interaction.user.id, page), allowed_mentions=discord.AllowedMentions.none())
 
@@ -338,16 +344,38 @@ class RaidService:
                     lines.append(f"[#{row['id']} {KINDS[row['kind']]}]({url}) · {start:%d-%m %H:%M} WIB · {EVENT_STATUSES[row['status']]}")
                 await interaction.response.send_message('\n'.join(lines) if rows else 'Belum ada event raid.', ephemeral=True)
 
-        @self.bot.tree.command(name='leaderboard', description='Peringkat poin kehadiran semua raid di server ini')
+        @self.bot.tree.command(name='addpoint', description='Administrator server menambah poin kontribusi untuk satu anggota')
+        @app_commands.guild_only()
+        @app_commands.default_permissions(administrator=True)
+        @app_commands.check(check_server)
+        @app_commands.describe(user='Anggota yang mendapat poin kontribusi', point='Jumlah poin kontribusi (positif)',
+                               detail='Detail kontribusi, maksimal 500 karakter')
+        async def addpoint(interaction: discord.Interaction, user: discord.Member,
+                           point: app_commands.Range[int, 1, 1000000], detail: str):
+            self.require_admin(interaction)
+            if not isinstance(user, discord.Member) or user.guild.id != self.guild_id or user.bot:
+                raise ValueError('Pilih satu anggota manusia pada server ini.')
+            await interaction.response.defer(ephemeral=True)
+            async with self.lock:
+                receipt = self.store.add_contribution(self.guild_id, user.id, point, detail,
+                                                      interaction.user.id, interaction.id)
+            log.info('Contribution #%s: guild_id=%s user_id=%s points=%s actor_id=%s',
+                     receipt, self.guild_id, user.id, point, interaction.user.id)
+            safe_detail = discord.utils.escape_markdown(discord.utils.escape_mentions(detail.strip()))
+            await interaction.followup.send(
+                f'✅ Contribution #{receipt}: <@{user.id}> mendapat **{point} poin** · 1 contribution.\n'
+                f'Detail: {safe_detail}', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+
+        @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')
         @app_commands.guild_only()
         @app_commands.check(check_server)
         async def leaderboard(interaction: discord.Interaction, halaman: app_commands.Range[int, 1, 10000] = 1):
             if not 1 <= halaman <= 10000:
                 raise ValueError('Halaman harus 1–10000.')
             rows = self.store.leaderboard(self.guild_id, halaman - 1)
-            lines = [f'🏆 **Leaderboard Raid — halaman {halaman}**', '1 poin langsung saat diterima leader; maksimal 1 per event.']
+            lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Total poin event dan contribution. Hadir = 1 poin per event.']
             for i, row in enumerate(rows, (halaman - 1) * 10 + 1):
-                lines.append(f"{i}. <@{row['user_id']}> — **{row['points']} poin** · {row['events']} event")
+                lines.append(f"{i}. **<@{row['user_id']}>** — **{row['points']} poin** · {row['events']} event, {row['contributions']} contribution")
             if not rows:
                 lines.append('Belum ada poin pada halaman ini.')
             await interaction.response.send_message('\n'.join(lines), allowed_mentions=discord.AllowedMentions.none())

@@ -283,21 +283,40 @@ Semua jam WIB. Tanggal default hari ini, dan jam yang sudah lewat ditolak (menit
 
 ### Alur sederhana
 
-Kartu hanya menampilkan **Menunggu diterima**, **Diterima**, dan **Tidak Hadir**.
+Kartu hanya menampilkan **Menunggu diterima**, **Hadir**, dan **Tidak Hadir**.
 
-- **Daftar:** masuk Menunggu diterima. Belum mendapat poin. Klik berulang tidak menggandakan entri; peserta diterima tetap diterima.
-- **Tidak Hadir:** menyatakan tidak ikut/membatalkan pendaftaran. Jika sebelumnya diterima, 1 poin event ini langsung ditarik. Bisa Daftar lagi, tetapi perlu diterima ulang.
-- **Kelola — Leader:** panel privat dengan menu peserta, **Terima**, dan **Tidak Hadir**. Ada navigasi halaman untuk lebih dari 25 peserta.
-- **Terima:** langsung mengubah status menjadi Diterima dan menambah **1 poin**, tanpa menunggu jam event, verifikasi hadir, atau Selesaikan Event. Maksimal 1 poin per peserta per event, termasuk jika tombol ditekan berulang.
+- **Daftar:** masuk Menunggu diterima. Belum mendapat poin. Klik berulang tidak menggandakan entri; peserta berstatus Hadir tetap Hadir.
+- **Tidak Hadir:** menyatakan tidak ikut/membatalkan pendaftaran. Jika sebelumnya Hadir, 1 poin event ini langsung ditarik. Bisa Daftar lagi, tetapi perlu diterima ulang.
+- **Kelola — Leader:** panel privat dengan menu peserta, **Hadir**, dan **Tidak Hadir**. Ada navigasi halaman untuk lebih dari 25 peserta.
+- **Hadir:** langsung mengubah status menjadi Hadir dan menambah **1 poin**, tanpa menunggu jam event, verifikasi hadir, atau Selesaikan Event. Maksimal 1 poin per peserta per event, termasuk jika tombol ditekan berulang.
 - Leader dapat menandai peserta **Tidak Hadir** untuk membatalkan penerimaan dan menarik poin. Peserta perlu memilih Daftar lagi sebelum diterima ulang.
 - **Selesaikan Event:** menutup perubahan daftar dan mempertahankan poin yang sudah tercatat, tanpa memberi poin tambahan. Tersedia mulai jam event. Ada konfirmasi sebelum penutupan; periksa daftar dahulu.
 - **Batalkan Event:** menutup event dan menarik semua poin event ini, tanpa memengaruhi poin dari event lain.
 
 Leader tidak mendapat poin otomatis karena membuat event. Leader/role pengelola dipercaya menentukan peserta diterima, termasuk dirinya sendiri jika mendaftar. Tidak ada tombol Absen atau Sahkan Hadir. Penutupan final pada versi awal: belum ada fitur buka ulang/koreksi poin setelah event ditutup.
 
+### Poin kontribusi administrator
+
+`/addpoint` hanya bisa dipakai anggota yang memiliki izin **Administrator** bawaan pada server Discord yang dikonfigurasi. Tidak memerlukan role khusus atau env tambahan. Manage Server saja, role leader, atau menjadi pembuat event tidak cukup. Hak pengelolaan raid tetap mengikuti leader event/RAID_LEADER_ROLE_ID.
+
+```text
+/addpoint user:@C.Ago point:5 detail:Membantu material guild
+/leaderboard
+```
+
+`user` memilih satu anggota server (bukan bot), `point` bilangan bulat positif 1–1000000, dan `detail` wajib 1–500 karakter setelah spasi tepi dibuang. Perintah dapat dijalankan di channel mana pun pada server yang dikonfigurasi. Respons pemberian poin hanya terlihat oleh administrator yang menjalankan; tidak mengirim ping ke penerima. ID kontribusi, penerima, jumlah poin, detail, pemberi, waktu, dan ID interaksi Discord disimpan di tabel `raid_contributions`. Tidak ada fitur ubah/hapus kontribusi pada versi ini.
+
+Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh 3 event Hadir (3 poin) + satu `/addpoint` 5 poin:
+
+> 1. **@C. Ago** — **8 poin** · 3 event, 1 contribution
+
+Anggota yang hanya punya poin kontribusi tetap masuk leaderboard dengan 0 event. Poin kontribusi tidak ditarik jika peserta memilih Tidak Hadir atau suatu raid dibatalkan. Pengiriman ulang interaksi Discord yang sama tidak menggandakan pemberian; menjalankan perintah baru adalah kontribusi baru.
+
+Setelah update, restart agar perintah baru tersinkronisasi. Data timer, raid, dan poin sebelumnya tetap dipertahankan.
+
 ### Data dan restart
 
-`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu poin per anggota per event. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Diterima; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Diterima pada event terbuka/selesai otomatis diberi 1 poin jika belum tercatat, tanpa menggandakan poin lama. Event batal tidak mendapat poin. `/leaderboard` menghitung total semua jenis raid untuk server ini, 10 anggota per halaman.
+`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu poin per anggota per event. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai otomatis diberi 1 poin jika belum tercatat, tanpa menggandakan poin lama. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.
 
 Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online untuk memproses klik; saat offline Discord akan menampilkan kegagalan interaksi. Setelah bot aktif, coba klik kembali. Event tertutup tetap dapat dilihat dengan `/raid`, tetapi tidak menerima perubahan. Jika perubahan kartu gagal akibat izin/jaringan, data tetap tersimpan dan respons mengarahkan ke `/raid event:<nomor>`.
 
@@ -305,12 +324,12 @@ Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online u
 
 1. Gunakan channel uji dan role leader milikmu, lalu buat `/rift` dengan jam WIB beberapa menit ke depan.
 2. Dari akun peserta, coba **Daftar**, lalu **Tidak Hadir**, lalu **Daftar** lagi.
-3. Leader membuka Kelola, memilih peserta, dan klik Terima. `/leaderboard` langsung bertambah 1 poin. Klik Terima lagi untuk memastikan poin tetap 1.
+3. Leader membuka Kelola, memilih peserta, dan klik Hadir. `/leaderboard` langsung bertambah 1 poin. Klik Hadir lagi untuk memastikan poin tetap 1.
 4. Restart bot selagi event terbuka dan coba tombol/panel lagi.
-5. Coba Tidak Hadir untuk menarik poin, lalu Daftar dan Terima ulang. Setelah jam event, Selesaikan Event dan konfirmasi: total poin tetap sama, tidak bertambah lagi.
+5. Coba Tidak Hadir untuk menarik poin, lalu Daftar dan Hadir ulang. Setelah jam event, Selesaikan Event dan konfirmasi: total poin tetap sama, tidak bertambah lagi.
 6. Untuk membersihkan poin event uji yang masih terbuka, gunakan Batalkan Event. Data/poin uji yang sudah diselesaikan tidak memiliki tombol reset pada versi awal.
 
-Tes otomatis mencakup tiga status, poin langsung saat diterima, penarikan poin, upgrade data lama, pemulihan setelah restart, izin lintas role/server, pembatalan, leaderboard, isolasi data timer lama, dan klik berulang tanpa poin ganda. Pengujian Discord langsung memerlukan bot berjalan dengan konfigurasi server milikmu.
+Tes otomatis mencakup tiga status, poin langsung saat ditandai Hadir, penarikan poin, upgrade data lama, pemulihan setelah restart, izin lintas role/server, pembatalan, leaderboard, isolasi data timer lama, dan klik berulang tanpa poin ganda. Pengujian Discord langsung memerlukan bot berjalan dengan konfigurasi server milikmu.
 
 ## Referensi
 
