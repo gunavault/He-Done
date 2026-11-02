@@ -75,8 +75,7 @@ class LeaderView(discord.ui.View):
 
             async def choose(interaction):
                 self.selected = select.values[0]
-                await interaction.response.send_message(f'Peserta dipilih: <@{self.selected}>. Pilih tindakan di panel.',
-                                                        ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+                await interaction.response.defer()
             select.callback = choose
             self.add_item(select)
         for action, label, style in (
