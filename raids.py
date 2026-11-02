@@ -273,7 +273,10 @@ class RaidService:
             warning = await self.refresh_notice(event_id)
         credit = self.store.event_credit(self.guild_id, event_id, interaction.user.id)
         points = f'{credit} poin tercatat untuk event ini.'
-        await interaction.followup.send(f'Status kamu: **{STATUSES[status]}**. {points}' + warning,
+        message = f'Status kamu: **{STATUSES[status]}**.'
+        if status != 'pending':
+            message += f' {points}'
+        await interaction.followup.send(message + warning,
                                         ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
     async def moderate(self, interaction, event_id, user_id, action, page=0):
