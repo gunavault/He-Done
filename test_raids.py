@@ -435,8 +435,13 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
             await command.callback(admin, target, 5, 'Material @everyone')
         row = self.service.store.leaderboard(123)[0]
         self.assertEqual((row['points'], row['events'], row['contributions']), (10, 3, 1))
-        self.assertTrue(admin.followup.send.call_args.kwargs['ephemeral'])
-        self.assertFalse(admin.followup.send.call_args.kwargs['allowed_mentions'].everyone)
+        admin.response.defer.assert_awaited_with(ephemeral=False)
+        self.assertFalse(admin.followup.send.call_args.kwargs['ephemeral'])
+        self.assertTrue(admin.followup.send.call_args.args[0].startswith('<@&789>\n'))
+        mentions = admin.followup.send.call_args.kwargs['allowed_mentions']
+        self.assertFalse(mentions.everyone)
+        self.assertFalse(mentions.users)
+        self.assertEqual([role.id for role in mentions.roles], [789])
         reader = self.interaction()
         await self.bot.tree.get_command('leaderboard').callback(reader)
         self.assertIn('1. **<@30>** — **10 poin** · 3 event, 1 contribution', reader.response.send_message.call_args.args[0])

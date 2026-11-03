@@ -360,7 +360,9 @@ class RaidService:
             self.require_admin(interaction)
             if not isinstance(user, discord.Member) or user.guild.id != self.guild_id or user.bot:
                 raise ValueError('Pilih satu anggota manusia pada server ini.')
-            await interaction.response.defer(ephemeral=True)
+            if not 1 <= len(detail.strip()) <= 500:
+                raise ValueError('Detail kontribusi harus 1–500 karakter.')
+            await interaction.response.defer(ephemeral=False)
             async with self.lock:
                 receipt = self.store.add_contribution(self.guild_id, user.id, point, detail,
                                                       interaction.user.id, interaction.id)
@@ -368,8 +370,11 @@ class RaidService:
                      receipt, self.guild_id, user.id, point, interaction.user.id)
             safe_detail = discord.utils.escape_markdown(discord.utils.escape_mentions(detail.strip()))
             await interaction.followup.send(
+                f'<@&{self.bot.role_id}>\n'
                 f'✅ Contribution #{receipt}: <@{user.id}> mendapat **{point} poin** · 1 contribution.\n'
-                f'Detail: {safe_detail}', ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
+                f'Detail: {safe_detail}', ephemeral=False,
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                    roles=[discord.Object(id=self.bot.role_id)], replied_user=False))
 
         @self.bot.tree.command(name='point', description='Lihat poin sendiri atau poin satu anggota server')
         @app_commands.guild_only()

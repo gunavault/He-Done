@@ -304,7 +304,7 @@ Leader tidak mendapat poin otomatis karena membuat event. Leader/role pengelola 
 /leaderboard
 ```
 
-`user` memilih satu anggota server (bukan bot), `point` bilangan bulat positif 1–1000000, dan `detail` wajib 1–500 karakter setelah spasi tepi dibuang. Perintah dapat dijalankan di channel mana pun pada server yang dikonfigurasi. Respons pemberian poin hanya terlihat oleh administrator yang menjalankan; tidak mengirim ping ke penerima. ID kontribusi, penerima, jumlah poin, detail, pemberi, waktu, dan ID interaksi Discord disimpan di tabel `raid_contributions`. Tidak ada fitur ubah/hapus kontribusi pada versi ini.
+`user` memilih satu anggota server (bukan bot), `point` bilangan bulat positif 1–1000000, dan `detail` wajib 1–500 karakter setelah spasi tepi dibuang. Perintah dapat dijalankan di channel mana pun pada server yang dikonfigurasi. Respons pemberian poin dikirim **publik pada channel tempat perintah dijalankan**, dengan mention role `ROLE_ID` seperti notifikasi T-Rex. Semua anggota yang punya akses ke channel itu dapat melihatnya. Pastikan role mentionable atau bot punya izin mention role, sama seperti konfigurasi pengingat T-Rex. Teks detail tidak dapat memicu ping tambahan. Perubahan ini berlaku untuk pesan `/addpoint` baru; pesan privat lama tidak berubah. ID kontribusi, penerima, jumlah poin, detail, pemberi, waktu, dan ID interaksi Discord disimpan di tabel `raid_contributions`. Tidak ada fitur ubah/hapus kontribusi pada versi ini.
 
 Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh Hadir pada satu T-Rex (2), satu Savage (3), dan satu Rift (1), ditambah satu `/addpoint` 5 poin:
 
