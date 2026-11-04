@@ -9,7 +9,7 @@ import discord
 from discord import app_commands
 
 from bot import TrexBot
-from schedule import WIB, daily_reminders
+from schedule import WIB, daily_reminders, effective_reminders
 
 
 class DeliveryTests(unittest.IsolatedAsyncioTestCase):
@@ -30,22 +30,49 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.env.stop()
         self.tmp.cleanup()
 
-    async def test_daily_delivery_and_no_duplicates_after_restart(self):
-        events = daily_reminders(date(2026, 10, 30))
+    async def test_registered_delivery_once_and_no_default_or_next_day_after_restart(self):
+        self.assertEqual(self.bot.slots, ())
+        for event in daily_reminders(date(2026, 10, 30)):
+            await self.bot.deliver_due(event.trigger)
+        self.bot.send_notice.assert_not_awaited()
+        await self.update_timer()
+        events = effective_reminders(date(2026, 10, 30), slots=(), timers=self.bot.store.timers(123))
         for event in events:
             await self.bot.deliver_due(event.trigger)
             await self.bot.deliver_due(event.trigger + timedelta(seconds=5))
-        self.assertEqual(self.bot.send_notice.await_count, 16)
+        self.assertEqual(self.bot.send_notice.await_count, 4)
         await self.bot.close()
         self.bot = TrexBot()
         self.bot.send_notice = AsyncMock()
         await self.bot.deliver_due(events[-1].trigger)
+        for event in events:
+            await self.bot.deliver_due(event.trigger + timedelta(days=1))
         self.bot.send_notice.assert_not_awaited()
-        for event in daily_reminders(date(2026, 10, 31)):
+        await self.update_timer(now=datetime(2026, 10, 31, 13, 0, tzinfo=WIB))
+        for event in effective_reminders(date(2026, 10, 31), slots=(), timers=self.bot.store.timers(123)):
             await self.bot.deliver_due(event.trigger)
-        self.assertEqual(self.bot.send_notice.await_count, 16)
+        self.assertEqual(self.bot.send_notice.await_count, 4)
+
+    async def morning_timer(self):
+        await self.update_timer(waktu='04:40', now=datetime(2026, 10, 30, 5, 0, tzinfo=WIB))
+
+    async def test_expired_register_is_not_shifted_to_tomorrow_and_can_be_replaced(self):
+        interaction = await self.update_timer(now=datetime(2026, 10, 30, 20, 0, tzinfo=WIB))
+        self.assertIn('Jendela ini sudah lewat', interaction.followup.send.call_args.args[0])
+        for now in (datetime(2026, 10, 30, 20, 0, tzinfo=WIB), datetime(2026, 10, 31, 13, 0, tzinfo=WIB)):
+            reader = AsyncMock()
+            with patch('bot.datetime') as clock:
+                clock.now.return_value = now
+                await self.bot.tree.get_command('worldbossregister').callback(reader)
+                await self.bot.tree.get_command('jadwal').callback(reader)
+            messages = [call.args[0] for call in reader.response.send_message.call_args_list]
+            self.assertIn('Belum ada jadwal world boss aktif', messages[0])
+            self.assertNotIn('**Index 3.1', messages[1])
+        await self.update_timer(waktu='20:00', now=datetime(2026, 10, 30, 20, 0, tzinfo=WIB))
+        self.assertEqual(self.bot.store.timers(123)[0].start, datetime(2026, 10, 31, 2, 40, tzinfo=WIB))
 
     async def test_failed_delivery_retries_but_stale_reminder_is_skipped(self):
+        await self.morning_timer()
         event = daily_reminders(date(2026, 10, 30))[0]
         self.bot.send_notice.side_effect = ValueError('simulated permission failure')
         await self.bot.deliver_due(event.trigger)
@@ -59,6 +86,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.send_notice.await_count, 2)
 
     async def test_trex_response_displays_nearest_without_ping(self):
+        await self.update_timer()
         interaction = AsyncMock()
         command = self.bot.tree.get_command('worldbossregister')
         with patch('bot.datetime') as clock:
@@ -67,7 +95,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.response.send_message.assert_awaited_once()
         args, kwargs = interaction.response.send_message.call_args
         self.assertIn('Index: **3.1**', args[0])
-        self.assertIn('18:00 WIB', args[0])
+        self.assertIn('18:00–18:20 WIB', args[0])
         self.assertIn('5 jam', args[0])
         self.assertEqual(kwargs['allowed_mentions'].to_dict(), {'parse': []})
         self.bot.send_notice.assert_not_awaited()
@@ -101,7 +129,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.bot.deliver_due(datetime(2026, 10, 30, 17, 40, tzinfo=WIB))
         self.bot.send_notice.assert_not_awaited()
         await self.bot.deliver_due(datetime(2026, 10, 31, 17, 40, tzinfo=WIB))
-        self.bot.send_notice.assert_awaited_once()
+        self.bot.send_notice.assert_not_awaited()
 
     async def test_update_index_isolation_and_nearest_response(self):
         await self.update_timer()
@@ -203,7 +231,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send_notice = AsyncMock()
         self.assertEqual(len(self.bot.store.timers(self.bot.guild_id)), 2)
         await self.bot.deliver_due(datetime(2026, 10, 31, 14, 30, tzinfo=WIB))
-        self.assertIn('Index 4.3', self.bot.send_notice.call_args.args[0])
+        self.bot.send_notice.assert_not_awaited()
 
     async def test_jadwal_includes_new_indices_without_truncation(self):
         interaction = AsyncMock()
@@ -214,14 +242,14 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         await self.update_timer(index='4.3', waktu='08:20')
         await self.update_timer(index='4.1', waktu='08:30')
         with patch('bot.datetime') as clock:
-            clock.now.return_value = datetime(2026, 10, 30, 20, 0, tzinfo=WIB)
+            clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
         message = interaction.response.send_message.call_args.args[0]
-        self.assertIn('Index belum diisi', message)
-        self.assertNotIn('4.1,', message.split('Index belum diisi: ')[1])
-        self.assertNotIn('4.3,', message.split('Index belum diisi: ')[1])
-        self.assertEqual(message.count('**Index'), 6)
-        for index in ('3.1', '3.2', '4.1', '4.3'):
+        self.assertIn('Index tanpa jadwal aktif', message)
+        self.assertNotIn('4.1,', message.split('Index tanpa jadwal aktif: ')[1])
+        self.assertNotIn('4.3,', message.split('Index tanpa jadwal aktif: ')[1])
+        self.assertEqual(message.count('**Index'), 2)
+        for index in ('4.1', '4.3'):
             self.assertIn(f'**Index {index}', message)
 
     async def flush_voice(self):
@@ -257,6 +285,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertGreater(interaction.response.send_message.await_count, 1)
 
     async def test_voice_receipt_prevents_duplicates_independently_of_text(self):
+        await self.morning_timer()
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(return_value=True)
         now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
@@ -269,6 +298,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.voice.announce.call_args.args[0].minutes_before, 30)
 
     async def test_spawn_trigger_sends_text_and_shared_voice_once(self):
+        await self.update_timer()
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(return_value=True)
         now = datetime(2026, 10, 30, 18, 0, tzinfo=WIB)
@@ -283,6 +313,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.voice.recording_for(reminder).name, 'spawn.mp3')
 
     async def test_voice_failure_retries_without_resending_text(self):
+        await self.morning_timer()
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(side_effect=RuntimeError('TTS offline'))
         now = datetime(2026, 10, 30, 10, 50, tzinfo=WIB)
@@ -299,6 +330,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.send_notice.assert_awaited_once()
 
     async def test_voice_can_succeed_even_when_text_fails(self):
+        await self.morning_timer()
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(return_value=True)
         self.bot.send_notice.side_effect = ValueError('Text permission denied')
@@ -307,6 +339,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.bot.voice.announce.assert_awaited_once()
 
     async def test_voice_job_is_invalidated_by_timer_update(self):
+        await self.morning_timer()
         event = daily_reminders(date(2026, 10, 30))[0]
         with patch('bot.datetime') as clock:
             clock.now.return_value = event.trigger
@@ -330,6 +363,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.voice.recording_for().name, 'test.mp3')
 
     async def test_unsupported_offsets_do_not_queue_voice(self):
+        await self.morning_timer()
         self.bot.voice.channel_id = 888
         self.bot.voice.announce = AsyncMock(return_value=True)
         await self.bot.deliver_due(datetime(2026, 10, 30, 11, 15, tzinfo=WIB))

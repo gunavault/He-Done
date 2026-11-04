@@ -1,4 +1,4 @@
-"""Daily WIB reminders and durable delivery receipts; no Discord dependency."""
+"""One-off registered WIB windows and durable receipts; no Discord dependency."""
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -115,22 +115,20 @@ def calculate_timer(index, waktu, tanggal=None, now=None, place=''):
 
 
 def effective_reminders(day, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timers=()):
-    """An updated index replaces all of that index's fallback slots, including future days."""
+    """Each registered timer produces exactly its original window, never a daily copy."""
     overridden = {timer.index for timer in timers}
     events = daily_reminders(day, tuple(slot for slot in slots if slot[0] not in overridden), offsets)
     for timer in timers:
-        start = datetime.combine(day, timer.start.timetz(), tzinfo=WIB)
-        if start < timer.start:
-            continue  # Don't invent an earlier occurrence before the first calculated window.
-        end = start + (timer.end - timer.start)
-        events.extend(Reminder(timer.index, start, offset, end, timer.place) for offset in offsets)
+        if day != timer.start.date():
+            continue
+        events.extend(Reminder(timer.index, timer.start, offset, timer.end, timer.place) for offset in offsets)
     return sorted(events, key=lambda event: event.trigger)
 
 
 def next_spawn(now, slots=DEFAULT_SLOTS, timers=()):
     """Closest scheduled spawn at or after now, including tomorrow's first spawn."""
     now = now.astimezone(WIB)
-    candidates = [event for delta in (0, 1)
+    candidates = [event for delta in (-1, 0, 1)
                   for event in effective_reminders(now.date() + timedelta(days=delta), slots, offsets=(0,), timers=timers)
                   if event.start >= now or (event.end and event.end > now)]
     if not candidates:
@@ -148,7 +146,8 @@ def next_spawn_message(now, slots=DEFAULT_SLOTS, timers=()):
              ((hours, 'jam'), (minutes, 'menit'), (seconds, 'detik')) if value]
     remaining = ' '.join(parts) if parts else ('Sedang dalam jendela spawn'
                 if event.end and event.start < now else 'Sekarang')
-    day = 'Hari ini' if event.start.date() == now.date() else 'Besok'
+    day = ('Hari ini' if event.start.date() == now.date() else
+           'Kemarin' if event.start.date() < now.date() else 'Besok')
     window = (f'{event.start:%H:%M}–{event.end:%H:%M} WIB'
               if event.end else f'{event.start:%H:%M} WIB')
     return (f'🦖 **Jadwal T-Rex terdekat**\n'

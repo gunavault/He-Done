@@ -34,11 +34,8 @@ class TrexBot(discord.Client):
         self.guild_id = int(required('GUILD_ID'))
         self.channel_id = int(required('CHANNEL_ID'))
         self.role_id = int(required('ROLE_ID'))
-        self.slots = tuple(sorted(
-            [(index, at) for index, env_name, default in (
-                ('3.1', 'INDEX_31_TIMES', '11:20,18:00'),
-                ('3.2', 'INDEX_32_TIMES', '12:47,19:27'))
-             for at in parse_times(os.getenv(env_name, default))], key=lambda slot: slot[1]))
+        # Only explicitly registered observations schedule reminders. Legacy daily envs are ignored.
+        self.slots = ()
         self.offsets = parse_offsets(os.getenv('REMINDER_MINUTES', '30,15,0'))
         path = Path(os.getenv('DB_PATH', 'data/trex.sqlite3'))
         if not path.is_absolute():
@@ -80,8 +77,12 @@ class TrexBot(discord.Client):
         async def worldbossregister(interaction: discord.Interaction, index: str | None = None,
                        tempat: str | None = None, waktu: str | None = None, tanggal: str | None = None):
             if index is None and tempat is None and waktu is None and tanggal is None:
+                try:
+                    message = next_spawn_message(datetime.now(WIB), self.slots, self.store.timers(self.guild_id))
+                except ValueError:
+                    message = 'Belum ada jadwal world boss aktif. Isi index, tempat, dan waktu untuk register baru.'
                 await interaction.response.send_message(
-                    next_spawn_message(datetime.now(WIB), self.slots, self.store.timers(self.guild_id)),
+                    message,
                     allowed_mentions=discord.AllowedMentions.none())
                 return
             if index is None or tempat is None or waktu is None:
@@ -95,11 +96,7 @@ class TrexBot(discord.Client):
                 now = datetime.now(WIB)
                 timer = calculate_timer(index, waktu, tanggal, now, place=tempat)
                 self.store.set_timer(self.guild_id, timer)
-                events = [event for delta in (0, 1)
-                          for event in effective_reminders(now.date() + timedelta(days=delta),
-                              self.slots, (0,), self.store.timers(self.guild_id))
-                          if event.index == index and (event.start >= now or event.end > now)]
-                event = min(events, key=lambda event: event.start)
+                event = Reminder(timer.index, timer.start, 0, timer.end, timer.place)
             lines = [f'✅ Timer index **{index}** diperbarui.',
                      f'Tempat: {display_place(timer.place)}',
                      f'Terakhir muncul: {timer.observed:%d-%m-%Y %H:%M} WIB',
@@ -109,7 +106,9 @@ class TrexBot(discord.Client):
                 label = f'H-{offset}' if offset else 'Jendela spawn dimulai'
                 status = ' (sudah lewat; dilewati)' if at + timedelta(seconds=60) <= now else ''
                 lines.append(f'{label}: {at:%d-%m %H:%M} WIB{status}')
-            lines.append('Jadwal lama index ini diganti. Berulang setiap hari sampai diperbarui lagi.')
+            lines.append('Jadwal lama index ini diganti. Berlaku sekali untuk register ini, tanpa pengulangan harian.')
+            if event.end <= now:
+                lines.append('Jendela ini sudah lewat. Register waktu kemunculan terbaru untuk menjadwalkan pengingat lagi.')
             await interaction.followup.send('\n'.join(lines), ephemeral=True,
                                              allowed_mentions=discord.AllowedMentions.none())
 
@@ -119,13 +118,11 @@ class TrexBot(discord.Client):
         async def jadwal(interaction: discord.Interaction, halaman: app_commands.Range[int, 1, 10000] = 1):
             now = datetime.now(WIB)
             timers = self.store.timers(self.guild_id)
-            events = [event for delta in (0, 1)
+            events = [event for delta in (-1, 0, 1)
                       for event in effective_reminders(now.date() + timedelta(days=delta),
                           self.slots, (0,), timers) if event.start >= now or (event.end and event.end > now)]
             blocks = []
-            overridden = {timer.index for timer in timers}
-            daily_count = sum(index not in overridden for index, _ in self.slots) + len(timers)
-            for event in sorted(events, key=lambda event: event.start)[:daily_count]:
+            for event in sorted(events, key=lambda event: event.start):
                 window = f'{event.start:%H:%M}' + (f'–{event.end:%H:%M}' if event.end else '')
                 lines = [f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**']
                 if event.place:
@@ -135,10 +132,10 @@ class TrexBot(discord.Client):
                     label = f'H-{offset}' if offset else 'Spawn dimulai'
                     lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
                 blocks.append('\n'.join(lines))
-            active_indices = {index for index, _ in self.slots} | overridden
+            active_indices = {event.index for event in events}
             unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
             if unconfigured:
-                blocks.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> tempat:<lokasi> waktu:<HH:MM>.')
+                blocks.append('\nIndex tanpa jadwal aktif: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> tempat:<lokasi> waktu:<HH:MM>.')
             pages, body = [], ''
             for block in blocks:
                 if body and len(body) + len(block) + 1 > 1750:
@@ -148,7 +145,7 @@ class TrexBot(discord.Client):
             pages.append(body or 'Belum ada jadwal.')
             if halaman > len(pages):
                 raise ValueError(f'Halaman tidak tersedia. Ada {len(pages)} halaman jadwal.')
-            header = f'🦖 **Jadwal berikutnya — WIB, berulang setiap hari** · halaman {halaman}/{len(pages)}'
+            header = f'🦖 **Jadwal world boss — WIB, sekali per register** · halaman {halaman}/{len(pages)}'
             await interaction.response.send_message(header + pages[halaman - 1], ephemeral=True,
                                                     allowed_mentions=discord.AllowedMentions.none())
 

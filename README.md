@@ -1,68 +1,30 @@
-# Bot notifikasi T-Rex Discord
+# Bot world boss dan raid Discord
 
-Bot Python yang otomatis tag satu role di satu channel teks **setiap hari**. Menggunakan WIB (`Asia/Jakarta`) meskipun timezone server UTC. Jadwal default aktif saat bot dijalankan. Gunakan `/worldbossregister index:3.1 tempat:Gurun waktu:11:20` untuk mengganti timer index berdasarkan waktu T-Rex terakhir muncul. `/worldbossregister` tanpa opsi tetap menampilkan spawn terdekat.
+Bot mengirim pengingat world boss dengan tag role berdasarkan **register satu kali**. Semua waktu memakai WIB (`Asia/Jakarta`), termasuk saat server memakai UTC. Tidak ada jadwal harian default dan tidak ada pengulangan setiap 24 jam.
 
-## Index yang tersedia
-
-Index **1.1–8.5** (angka utama 1–8, sub-index .1–.5; total 40) dapat dipilih melalui autocomplete opsi `index` pada `/worldbossregister`. Ketik `8.` untuk menampilkan 8.1–8.5. Hanya index 3.1 dan 3.2 yang memiliki jam default: isi waktu terakhir muncul agar timer dan pengingatnya aktif. Rumus waktunya sama, yaitu 6 jam 40 menit–7 jam setelah kemunculan terakhir. Setiap index memiliki timer tersendiri yang tersimpan setelah restart dan berulang setiap hari sampai diperbarui.
-
-```text
-/worldbossregister index:4.3 tempat:Gurun waktu:08:20
-/worldbossregister index:4.1 tempat:Gurun waktu:08:30
-```
-
-Jam di atas hanya contoh; masukkan waktu aktual dalam WIB. `/jadwal` menampilkan semua slot harian aktif dan menandai index yang belum diisi. Tidak perlu mengubah `.env` atau membuat database baru untuk kedua index tambahan.
-
-## Update timer lewat Discord
+## Register world boss
 
 ```text
 /worldbossregister index:3.1 tempat:Gurun waktu:11:20
-/worldbossregister index:3.2 tempat:Gurun waktu:12:47
+/worldbossregister index:8.5 tempat:Savana waktu:12:00
 /worldbossregister
 /jadwal
+/jadwal halaman:2
 ```
 
-Pada slash command Discord, pilih opsi `index` dan `waktu`; gunakan `:` seperti contoh, bukan mengetik `index=...` sebagai teks pesan biasa.
+Opsi index tersedia **1.1–8.5**, total 40 kombinasi. Ketik angka utama seperti `8.` untuk melihat 8.1–8.5. Saat mengupdate, isi `index`, `tempat`, dan `waktu` bersama. `tempat` maksimal 100 karakter. `waktu` adalah jam kemunculan aktual terakhir, bukan jam notifikasi.
 
-- `waktu` adalah **waktu terakhir T-Rex muncul**, bukan jam pengingat atau jam spawn berikutnya.
-- Perkiraan spawn berikutnya adalah **waktu + 6 jam 40 menit sampai waktu + 7 jam**, dengan pengingat dihitung dari awal jendela.
-- `/worldbossregister index:3.1 tempat:Gurun waktu:11:20` menghasilkan jendela **18:00–18:20 WIB**, pengingat **17:30, 17:45, 17:55, 18:00**.
-- Update menjadi `waktu:11:30` mengganti jendela menjadi **18:10–18:30 WIB**, pengingat **17:40, 17:55, 18:05, 18:10**.
-- Update hanya mengganti index yang dipilih. Seluruh jadwal default/hasil update sebelumnya untuk index itu diganti dengan **satu jendela harian baru**. Index lainnya tidak berubah. Jadi sesudah update 3.1 ke `11:20`, slot tetap 3.1 pukul 11:20 tidak lagi mengirim notifikasi; jendela barunya adalah 18:00–18:20.
-- Jendela hasil update berulang setiap hari pada jam yang sama sampai diubah lagi. Bot tidak menghitung siklus berikutnya dari perkiraan secara otomatis; perbarui `waktu` saat melihat kemunculan aktual agar waktunya akurat.
-- Timer tersimpan di SQLite, bertahan setelah restart, dan tidak ditimpa konfigurasi jam default di `.env`.
-- Update hanya diizinkan bagi anggota yang memiliki role dengan ID persis sama dengan **`ROLE_ID`** di environment aktif; `/worldbossregister` tanpa opsi dan `/jadwal` bisa digunakan anggota biasa. Konfirmasi update privat dan tidak tag role. Pengingat terjadwal tetap tag role di channel tujuan.
-- Tanggal default adalah hari ini WIB. Jika catatan berasal dari kemarin, isi `tanggal:2026-10-30`, misalnya `/worldbossregister index:3.1 tempat:Gurun waktu:23:20 tanggal:2026-10-30`. Hasilnya 31-10-2026 06:00–06:20 WIB. Waktu terakhir muncul yang masih di masa depan ditolak.
-- Bila input sudah menghasilkan jendela yang seluruhnya lewat hari ini, bot menampilkan jadwal berulang berikutnya besok. Pengingat yang sudah lewat tidak dikirim sekaligus; tetap mengikuti tenggang 60 detik pada bagian batasan di bawah.
-- `/worldbossregister` juga menampilkan jendela hasil update yang sedang berlangsung sampai waktu akhirnya, lalu memilih jadwal berikutnya.
+Formula tetap **+6 jam 40 menit sampai +7 jam**. Contoh register 11:20 menghasilkan satu jendela **18:00–18:20 WIB pada tanggal yang dihitung**, dengan default pengingat H-30 17:30, H-15 17:45, dan H-0 18:00. Offset lain mengikuti REMINDER_MINUTES. Setelah 18:20 berlalu, jadwal menjadi tidak aktif dan tidak dibuat lagi untuk besok. Register lagi dengan waktu kemunculan baru untuk jadwal berikutnya. Tidak ada siklus 6 jam 40 menit otomatis.
+
+Update index yang sama mengganti register sebelumnya; index lain tetap terpisah. Timer tersimpan setelah restart dengan tanggal/jam aslinya. Register lama yang sudah kedaluwarsa tetap tersimpan sebagai data, tetapi tidak mengirim pengingat lagi. `INDEX_31_TIMES` dan `INDEX_32_TIMES` dari env lama diabaikan, sehingga tidak ada jadwal tambahan tanpa register.
+
+Tanggal default hari ini WIB. Untuk waktu kemunculan kemarin, isi `tanggal:YYYY-MM-DD`. Jika formula melintasi tengah malam, jadwal bisa jatuh besok dan tetap hanya sekali. Waktu kemunculan yang masih di masa depan ditolak. Jika jendela hasil perhitungan sudah seluruhnya lewat, bot memberitahu bahwa jendela sudah lewat, tanpa menggesernya ke besok. Pengingat yang terlewat mengikuti tenggang 60 detik, bukan dikirim sekaligus.
+
+`/worldbossregister` tanpa opsi menampilkan spawn terdekat atau jendela yang masih aktif. Jika semua register sudah lewat, bot meminta register baru. `/jadwal` hanya menampilkan jendela yang aktif/akan datang, berhalaman bila perlu. Tempat tampil pada konfirmasi, jadwal, spawn terdekat, dan pesan pengingat.
 
 ## Izin edit timer
 
-`ROLE_ID` digunakan untuk dua hal: role yang ditag pada notifikasi dan role yang boleh memperbarui timer lewat `/worldbossregister index:... tempat:Gurun waktu:...`. Pemeriksaan memakai ID role dari anggota yang memanggil perintah, bukan nama role. Anggota dengan role itu tidak memerlukan Manage Server untuk mengedit.
-
-Pemilik server/admin yang tidak memiliki role tersebut juga tidak dapat mengedit timer melalui bot. Berikan role yang sesuai kepada operator yang ditunjuk. `ROLE_ID` tidak boleh diisi ID @everyone.
-
-`/worldbossregister` tanpa opsi dan `/jadwal` tetap dapat dipakai anggota server untuk melihat jadwal. `/tes` dan `/tesvoice` tetap memakai batasan Manage Server. Restart bot setelah mengubah `ROLE_ID` di `.env` atau Startup Wispbyte; jika keduanya mengatur nilai tersebut, pastikan environment aktif menggunakan ID yang dimaksud.
-
-## Jadwal harian default (sebelum index diperbarui)
-
-| Index | H-30 menit | H-15 menit | H-5 menit | Saat spawn |
-| --- | --- | --- | --- | --- |
-| 3.1 | 10:50 | 11:05 | 11:15 | 11:20 |
-| 3.2 | 12:17 | 12:32 | 12:42 | 12:47 |
-| 3.1 | 17:30 | 17:45 | 17:55 | 18:00 |
-| 3.2 | 18:57 | 19:12 | 19:22 | 19:27 |
-
-**Semua jam di atas WIB.** Tabel juga menampilkan referensi H-5 dan saat spawn; konfigurasi default sekarang H-30/H-15/H-0. Untuk empat slot default ada 12 pesan per hari. Setelah kedua index awal diperbarui menjadi satu jendela per index, ada 6 pesan per hari (belum termasuk index tambahan yang diaktifkan). Jam 11:20 dan 12:47 adalah waktu spawn tambahan, bukan waktu pencatatan awal. Bot hanya mengikuti jadwal yang dikonfigurasi, tanpa membaca keadaan game.
-
-Contoh pesan pada 10:50 WIB:
-
-```text
-@T-Rex Hunter
-🦖 T-Rex — Index 3.1 | H-30 menit
-Jadwal spawn T-Rex: 11:20 WIB.
-Tanggal spawn: 31-10-2026
-```
+`ROLE_ID` menentukan role yang ditag pada notifikasi sekaligus role yang boleh memperbarui timer. ID role anggota harus sama persis; Manage Server/Administrator saja tidak menggantikan role tersebut. Role @everyone tidak boleh digunakan. Konfirmasi update bersifat privat. Anggota biasa tetap bisa melihat jadwal. `/tes` dan `/tesvoice` tetap memerlukan Manage Server.
 
 ## Pengumuman suara dari MP3
 
@@ -151,15 +113,13 @@ DISCORD_TOKEN=token_bot_discord
 GUILD_ID=123456789012345678
 CHANNEL_ID=234567890123456789
 ROLE_ID=345678901234567890
-INDEX_31_TIMES=11:20,18:00
-INDEX_32_TIMES=12:47,19:27
 REMINDER_MINUTES=30,15,0
 DB_PATH=data/trex.sqlite3
 ```
 
 Angka ID di atas hanya contoh. Gunakan ID asli; role dan channel harus berada di server yang sama. Jangan menggunakan ID @everyone.
 
-- `INDEX_31_TIMES` / `INDEX_32_TIMES`: daftar jam spawn harian dalam WIB, format HH:MM dipisah koma. Dipakai hanya untuk index yang belum diperbarui lewat `/worldbossregister`.
+- `INDEX_31_TIMES` / `INDEX_32_TIMES`: variabel lama yang diabaikan. Semua jadwal berasal dari register satu kali.
 - `REMINDER_MINUTES`: menit sebelum awal jendela spawn. Default `30,15,0` berarti H-30, H-15, dan saat awal perkiraan spawn.
 - Jika hanya ingin tiga pengingat sebelum spawn, gunakan `REMINDER_MINUTES=30,15,5` (3 pesan per jendela spawn).
 - Restart bot setelah mengubah konfigurasi. Pada Docker Compose jalankan ulang `docker compose up -d --build` agar environment baru diterapkan.
@@ -206,9 +166,9 @@ git pull origin main
 docker compose up -d --build
 ```
 
-Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; tambahkan `INDEX_31_TIMES`, `INDEX_32_TIMES`, dan `REMINDER_MINUTES` seperti contoh di atas. Jika tidak ditambahkan, default empat jadwal harian tetap digunakan.
+Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; atur `REMINDER_MINUTES` seperti contoh di atas. Jadwal hanya aktif setelah register; variabel INDEX_31_TIMES/INDEX_32_TIMES tidak digunakan.
 
-Versi ini menambahkan update timer ke jadwal harian. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan; interval perhitungan tetap 400–420 menit. Database lama otomatis mendapat tabel timer baru tanpa menghapus data sebelumnya.
+Versi ini memakai timer sekali per register. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan; interval perhitungan tetap 400–420 menit. Database lama otomatis mendapat tabel timer baru tanpa menghapus data sebelumnya.
 
 ### Wispbyte
 
@@ -216,7 +176,7 @@ Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.t
 
 ## Perintah Discord
 
-- `/worldbossregister`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika jadwal hari ini sudah lewat, memilih jadwal pertama besok. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
+- `/worldbossregister`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika tidak ada jadwal aktif, meminta register baru tanpa mengulang jadwal lama. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
 - `/worldbossregister index:3.1 tempat:Gurun waktu:11:20`: perbarui timer satu index. `index`, `tempat`, dan `waktu` wajib diisi bersama; `tanggal` opsional. Hanya anggota dengan role sesuai `ROLE_ID` yang dapat mengedit.
 - `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
 - `/tesvoice`: tes suara di voice channel yang dikonfigurasi, kemudian keluar. Memerlukan **Manage Server**.
@@ -243,7 +203,7 @@ Setelah dependencies terpasang:
 python -m unittest discover -p 'test_*.py' -v
 ```
 
-Tes memeriksa jadwal default dan timer hasil update, pembatalan pengingat lama, isolasi antar-index, pengulangan harian, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, respons `/worldbossregister`, antrean suara, pembatalan timer, izin voice, dan pembersihan koneksi/audio saat gagal. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
+Tes memeriksa register satu kali, tidak adanya jadwal default, pembatalan pengingat lama, isolasi antar-index, tidak berulang setelah restart, WIB pada server UTC, lintas tengah malam, validasi input/izin, restart, retry, pengingat kedaluwarsa, pembatasan mention role, pemilihan spawn terdekat, respons `/worldbossregister`, antrean suara, pembatalan timer, izin voice, dan pembersihan koneksi/audio saat gagal. Pengiriman asli diuji dengan `/tes` setelah token/ID dipasang.
 
 ## Raid manual: T-Rex, Rift, Savage
 
@@ -436,7 +396,7 @@ Tes otomatis memeriksa katalog awal, perubahan katalog setelah restart, saldo/kl
 /jadwal halaman:2
 ```
 
-Format update timer adalah **index → tempat → waktu**, dengan tanggal opsional. `waktu` tetap waktu terakhir boss muncul, bukan langsung waktu spawn berikutnya. Rumus perkiraan berikut tetap +6 jam 40 menit sampai +7 jam, berulang setiap hari. Tanpa opsi, `/worldbossregister` tetap menampilkan jadwal terdekat. Update memerlukan role `ROLE_ID` seperti sebelumnya.
+Format update timer adalah **index → tempat → waktu**, dengan tanggal opsional. `waktu` tetap waktu terakhir boss muncul, bukan langsung waktu spawn berikutnya. Rumus perkiraan berikut tetap +6 jam 40 menit sampai +7 jam, hanya untuk satu jendela dari register tersebut. Tanpa opsi, `/worldbossregister` tetap menampilkan jadwal terdekat. Update memerlukan role `ROLE_ID` seperti sebelumnya.
 
 Index menerima 1.1–1.5, 2.1–2.5, sampai 8.1–8.5. Karena ada 40 kombinasi, menu memakai autocomplete maksimal 25 saran per pencarian: ketik angka utama seperti `8.` untuk melihat semua sub-index yang cocok. `/worldbossraid` memakai index yang sama. Memilih index baru tidak mengaktifkan jadwal sampai waktu terakhir muncul diisi.
 

@@ -116,13 +116,24 @@ class ScheduleTests(unittest.TestCase):
             self.assertEqual(len(index_events), 4)
             self.assertEqual(index_events[0].start.strftime('%H:%M'), expected)
 
-    def test_timer_crosses_midnight_and_repeats_daily(self):
+    def test_timer_crosses_midnight_without_daily_repeat(self):
         now = datetime(2026, 10, 30, 23, 30, tzinfo=WIB)
         timer = calculate_timer('3.1', '23:20', now=now)
         self.assertEqual(timer.start, datetime(2026, 10, 31, 6, 0, tzinfo=WIB))
         self.assertFalse([e for e in effective_reminders(now.date(), timers=(timer,)) if e.index == '3.1'])
         events = effective_reminders(date(2026, 11, 1), timers=(timer,))
-        self.assertIn(datetime(2026, 11, 1, 5, 30, tzinfo=WIB), [e.trigger for e in events if e.index == '3.1'])
+        self.assertEqual([e for e in events if e.index == '3.1'], [])
+
+    def test_one_off_window_active_across_midnight_then_expires(self):
+        observed = datetime(2026, 10, 30, 18, 0, tzinfo=WIB)
+        timer = calculate_timer('8.5', '17:10', now=observed, place='Gurun')
+        now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
+        event = next_spawn(now, slots=(), timers=(timer,))
+        self.assertEqual(event.start, datetime(2026, 10, 30, 23, 50, tzinfo=WIB))
+        self.assertIn('Kemarin', next_spawn_message(now, slots=(), timers=(timer,)))
+        with self.assertRaises(ValueError):
+            next_spawn(datetime(2026, 10, 31, 0, 10, tzinfo=WIB), slots=(), timers=(timer,))
+        self.assertEqual(list(due_reminders(now + timedelta(days=1), slots=(), timers=(timer,))), [])
 
     def test_timer_validation_and_previous_day(self):
         now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
