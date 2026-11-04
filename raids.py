@@ -426,7 +426,8 @@ class RaidService:
                 f"Event: **{summary['events']} event** · {summary['event_points']} poin\n"
                 f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin\n"
                 f"Pengurangan: **{summary['deduction_points']} poin**\n"
-                f"Redeem terpakai: **{summary['redeem_points']} poin**",
+                f"Redeem terpakai: **{summary['redeem_points']} poin**\n"
+                f"Gaji diterima: **{self.store.salary_summary(self.guild_id, member.id)['points']} poin**",
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
         @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')
