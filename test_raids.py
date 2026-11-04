@@ -184,17 +184,17 @@ class RaidStoreTests(unittest.TestCase):
 
     def test_personal_point_summary_includes_zero_and_isolates_user_and_server(self):
         empty = dict(self.store.point_summary(123, 1))
-        self.assertEqual(empty, dict(points=0, events=0, contributions=0, event_points=0, contribution_points=0, deduction_points=0))
+        self.assertEqual(empty, dict(points=0, events=0, contributions=0, event_points=0, contribution_points=0, deduction_points=0, redeem_points=0))
         self.signup()
         self.moderate(1, 'accepted')
         self.store.add_contribution(123, 1, 5, 'Material', 99, 'summary-1')
         self.store.add_contribution(123, 2, 20, 'Other user', 99, 'summary-2')
         self.store.add_contribution(124, 1, 100, 'Other server', 99, 'summary-3')
         self.assertEqual(dict(self.store.point_summary(123, 1)),
-                         dict(points=45, events=1, contributions=1, event_points=40, contribution_points=5, deduction_points=0))
+                         dict(points=45, events=1, contributions=1, event_points=40, contribution_points=5, deduction_points=0, redeem_points=0))
         self.store.respond(123, self.event_id, 1, 'Player', False)
         self.assertEqual(dict(self.store.point_summary(123, 1)),
-                         dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5, deduction_points=0))
+                         dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5, deduction_points=0, redeem_points=0))
 
     def test_three_event_weights_and_upgrade_old_one_point_constraint(self):
         ids = [self.event_id]

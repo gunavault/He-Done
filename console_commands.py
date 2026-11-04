@@ -57,9 +57,9 @@ class ConsoleCommands:
             async with self.raids.lock:
                 reset = self.raids.store.wipe_points(self.raids.guild_id, 'wispbyte-console',
                                                      'console:' + uuid.uuid4().hex)
-            log.warning('Reset #%s selesai pada guild %s: %s catatan poin event, %s contribution, dan %s pengurangan direset. '
+            log.warning('Reset #%s selesai pada guild %s: %s catatan poin event, %s contribution, %s pengurangan, dan %s redeem direset. '
                         'Timer dan daftar peserta tetap tersimpan; poin lama tidak dipulihkan saat restart.',
-                        reset['id'], self.raids.guild_id, reset['event_awards'], reset['contributions'], reset['deductions'])
+                        reset['id'], self.raids.guild_id, reset['event_awards'], reset['contributions'], reset['deductions'], reset['redemptions'])
         except Exception:
             log.exception('Reset poin dari console gagal; periksa database dan log.')
 

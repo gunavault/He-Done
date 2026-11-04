@@ -4,6 +4,7 @@ import re
 from datetime import datetime, date, timedelta
 
 from schedule import WIB, parse_time, SUPPORTED_INDICES
+from redeem_store import RedeemStoreMixin
 
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
@@ -30,7 +31,7 @@ def raid_time(jam, tanggal=None, now=None):
     return start
 
 
-class RaidStore:
+class RaidStore(RedeemStoreMixin):
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
@@ -88,6 +89,7 @@ class RaidStore:
                 event_awards INTEGER NOT NULL, contributions INTEGER NOT NULL
             );
         ''')
+        self.init_redeem_tables()
         with self.db:
             # Replace the old CHECK(points=1) without losing existing awards.
             schema = self.db.execute("SELECT sql FROM sqlite_master WHERE name='raid_points'").fetchone()[0]
@@ -104,6 +106,8 @@ class RaidStore:
                 self.db.execute('ALTER TABLE raid_contributions ADD COLUMN voided INTEGER NOT NULL DEFAULT 0')
             if 'deductions' not in {row['name'] for row in self.db.execute('PRAGMA table_info(raid_point_resets)')}:
                 self.db.execute('ALTER TABLE raid_point_resets ADD COLUMN deductions INTEGER NOT NULL DEFAULT 0')
+            if 'redemptions' not in {row['name'] for row in self.db.execute('PRAGMA table_info(raid_point_resets)')}:
+                self.db.execute('ALTER TABLE raid_point_resets ADD COLUMN redemptions INTEGER NOT NULL DEFAULT 0')
         # Upgrade older six-status raids and reconcile one point per accepted member.
         # Idempotent: restarting never adds a second point for an event/user pair.
         with self.db:
@@ -288,25 +292,32 @@ class RaidStore:
                 SELECT user_id,points,0 AS events,1 AS contributions FROM raid_contributions WHERE guild_id=? AND voided=0
                 UNION ALL
                 SELECT user_id,-points,0 AS events,0 AS contributions FROM raid_deductions WHERE guild_id=? AND voided=0
+                UNION ALL
+                SELECT user_id,-price,0 AS events,0 AS contributions FROM redeem_orders
+                    WHERE guild_id=? AND voided=0 AND status IN ('pending','fulfilled')
             ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
-            (str(guild_id), str(guild_id), str(guild_id), page * 10)).fetchall()
+            (str(guild_id), str(guild_id), str(guild_id), str(guild_id), page * 10)).fetchall()
 
     def point_summary(self, guild_id, user_id):
         return self.db.execute('''SELECT COALESCE(SUM(points),0) AS points,
                 COALESCE(SUM(events),0) AS events,COALESCE(SUM(contributions),0) AS contributions,
                 COALESCE(SUM(event_points),0) AS event_points,
                 COALESCE(SUM(contribution_points),0) AS contribution_points,
-                COALESCE(SUM(deduction_points),0) AS deduction_points
+                COALESCE(SUM(deduction_points),0) AS deduction_points,
+                COALESCE(SUM(redeem_points),0) AS redeem_points
             FROM (
-                SELECT points,1 AS events,0 AS contributions,points AS event_points,0 AS contribution_points,0 AS deduction_points
+                SELECT points,1 AS events,0 AS contributions,points AS event_points,0 AS contribution_points,0 AS deduction_points,0 AS redeem_points
                 FROM raid_points WHERE guild_id=? AND user_id=?
                 UNION ALL
-                SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points,0 AS deduction_points
+                SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points,0 AS deduction_points,0 AS redeem_points
                 FROM raid_contributions WHERE guild_id=? AND user_id=? AND voided=0
                 UNION ALL
-                SELECT -points,0 AS events,0 AS contributions,0 AS event_points,0 AS contribution_points,points AS deduction_points
+                SELECT -points,0 AS events,0 AS contributions,0 AS event_points,0 AS contribution_points,points AS deduction_points,0 AS redeem_points
                 FROM raid_deductions WHERE guild_id=? AND user_id=? AND voided=0
-            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
+                UNION ALL
+                SELECT -price,0 AS events,0 AS contributions,0 AS event_points,0 AS contribution_points,0 AS deduction_points,price AS redeem_points
+                FROM redeem_orders WHERE guild_id=? AND user_id=? AND voided=0 AND status IN ('pending','fulfilled')
+            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
 
     def wipe_points(self, guild_id, actor_id, interaction_id):
         with self.db:
@@ -320,15 +331,17 @@ class RaidStore:
             event_count = self.db.execute('SELECT COUNT(*) FROM raid_points WHERE guild_id=?', (str(guild_id),)).fetchone()[0]
             contributions = self.db.execute('SELECT COUNT(*) FROM raid_contributions WHERE guild_id=? AND voided=0', (str(guild_id),)).fetchone()[0]
             deductions = self.db.execute('SELECT COUNT(*) FROM raid_deductions WHERE guild_id=? AND voided=0', (str(guild_id),)).fetchone()[0]
+            redemptions = self.db.execute("SELECT COUNT(*) FROM redeem_orders WHERE guild_id=? AND voided=0 AND status IN ('pending','fulfilled')", (str(guild_id),)).fetchone()[0]
             self.db.execute('''INSERT OR IGNORE INTO raid_wiped_awards
                 SELECT event_id,user_id FROM raid_points WHERE guild_id=?''', (str(guild_id),))
             self.db.execute('DELETE FROM raid_points WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE raid_contributions SET voided=1 WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE raid_deductions SET voided=1 WHERE guild_id=?', (str(guild_id),))
+            self.db.execute('UPDATE redeem_orders SET voided=1 WHERE guild_id=?', (str(guild_id),))
             cur = self.db.execute('''INSERT INTO raid_point_resets
-                (interaction_id,guild_id,actor_id,created_at,event_awards,contributions,deductions)
-                VALUES(?,?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
-                                       datetime.now(WIB).isoformat(), event_count, contributions, deductions))
+                (interaction_id,guild_id,actor_id,created_at,event_awards,contributions,deductions,redemptions)
+                VALUES(?,?,?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
+                                       datetime.now(WIB).isoformat(), event_count, contributions, deductions, redemptions))
             return self.db.execute('SELECT * FROM raid_point_resets WHERE id=?', (cur.lastrowid,)).fetchone()
 
     def event_credit(self, guild_id, event_id, user_id):

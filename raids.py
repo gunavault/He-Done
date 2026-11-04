@@ -419,7 +419,8 @@ class RaidService:
                 f"Total: **{summary['points']} poin**\n"
                 f"Event: **{summary['events']} event** · {summary['event_points']} poin\n"
                 f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin\n"
-                f"Pengurangan: **{summary['deduction_points']} poin**",
+                f"Pengurangan: **{summary['deduction_points']} poin**\n"
+                f"Redeem terpakai: **{summary['redeem_points']} poin**",
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
         @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')
@@ -429,7 +430,7 @@ class RaidService:
             if not 1 <= halaman <= 10000:
                 raise ValueError('Halaman harus 1–10000.')
             rows = self.store.leaderboard(self.guild_id, halaman - 1)
-            lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Total poin event dan contribution. World Boss/T-Rex: 40 · War di Savage: 50 · Rift: 35 poin.']
+            lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Saldo poin setelah pengurangan dan redeem. World Boss/T-Rex: 40 · War di Savage: 50 · Rift: 35 poin.']
             for i, row in enumerate(rows, (halaman - 1) * 10 + 1):
                 lines.append(f"{i}. **<@{row['user_id']}>** — **{row['points']} poin** · {row['events']} event, {row['contributions']} contribution")
             if not rows:

@@ -14,6 +14,7 @@ from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, pa
 from voice_alerts import VoiceAnnouncer
 from raids import RaidService
 from console_commands import ConsoleCommands
+from redeem import RedeemService
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -52,6 +53,7 @@ class TrexBot(discord.Client):
         self._voice_retry_after = {}
         self.register_commands()
         self.raids = RaidService(self, path)
+        self.redeem = RedeemService(self)
         self.console = ConsoleCommands(self.raids)
 
     def require_timer_role(self, interaction):
@@ -182,6 +184,7 @@ class TrexBot(discord.Client):
 
     async def setup_hook(self):
         self.raids.restore_views()
+        self.redeem.restore_views()
         self.console.start()
         # Sync optional /trex parameters and remove obsolete commands from this guild.
         self.tree.copy_global_to(guild=self.target_guild)

@@ -366,6 +366,67 @@ Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online u
 
 Tes otomatis mencakup tiga status, poin langsung saat ditandai Hadir, penarikan poin, upgrade data lama, pemulihan setelah restart, izin lintas role/server, pembatalan, leaderboard, isolasi data timer lama, dan klik berulang tanpa poin ganda. Pengujian Discord langsung memerlukan bot berjalan dengan konfigurasi server milikmu.
 
+## Katalog redeem dan penyerahan barang
+
+Katalog awal diisi **sekali untuk server ini** pada startup setelah update:
+
+| Item | Harga tukar |
+|---|---:|
+| Senjata Tarbo | 200 poin |
+| Senjata Iguana | 200 poin |
+| Senjata Amarga | 300 poin |
+| Senjata T-Rex | 500 poin |
+| Armor Brachi / RedIguana | 200 poin |
+| Kepala (helm) Brachi / RedIguana | 100 poin |
+| Sarung tangan | 80 poin |
+| Sepatu | 80 poin |
+
+Sarung tangan/sepatu termasuk katalog awal dan dapat dihapus jika tidak diperlukan. Tidak ada batas stok otomatis pada versi awal; Administrator perlu memastikan barang bisa disediakan. Bot mencatat penukaran, sedangkan barang game diserahkan manual.
+
+### Untuk anggota
+
+```text
+/katalog
+/katalog halaman:2
+/redeem
+/redeem item:1
+/redeemhistory
+```
+
+`/katalog` menampilkan kartu publik dengan tombol **Tukar Poin**. Anggota yang menekan tombol mendapat menu privat berisi saldo dan pilihan item. Pilih item lalu **Konfirmasi Redeem**; pilihan item mengganti menu yang sama, dan hasil penukaran mengganti konfirmasi agar tidak membuat banyak chat. `/redeem item:<nomor>` bisa langsung membuka konfirmasi. Nomor item ditampilkan di katalog; gunakan nomor aktual, jangan mengandalkan nomor contoh.
+
+Satu konfirmasi = satu item, dengan poin dipotong langsung saat berhasil dan status **Menunggu penyerahan**. Saldo diperiksa ulang ketika konfirmasi; saldo yang kurang, item dihapus, atau harga berubah membatalkan proses tanpa biaya. Tombol Batal sebelum konfirmasi tidak memotong poin. Klik konfirmasi ganda tidak membuat penukaran ganda. Untuk meminta item kedua, jalankan redeem baru.
+
+`/redeemhistory` menampilkan 10 penukaran milik sendiri per halaman, termasuk nomor penukaran, nama item, harga, dan status. Anggota menghubungi Administrator untuk penyerahan atau pembatalan setelah konfirmasi. Menu/konfirmasi privat berlaku 3 menit; setelah restart buka `/redeem` lagi. Kartu katalog publik tetap bisa membuka menu baru setelah restart.
+
+### Untuk Administrator server
+
+```text
+/katalogadd nama:Senjata Baru harga:250
+/katalogremove item:1
+/redeemqueue
+/redeemstatus id:1 status:Sudah diserahkan
+/redeemstatus id:1 status:Batalkan dan kembalikan poin
+```
+
+Semua perintah pengelolaan memerlukan izin **Administrator** bawaan Discord. `katalogadd` menerima nama 1–100 karakter dan harga 1–1000000 poin. Nama aktif yang sama tidak bisa diduplikasi. `katalogremove` menghapus item dari katalog aktif tanpa menghapus riwayat/penukaran yang sudah tercatat. Untuk mengganti harga, hapus item lama lalu tambahkan kembali dengan harga baru; nomor item ikut berubah.
+
+Kartu `/katalog` lama merupakan tampilan saat dikirim. Jalankan `/katalog` lagi untuk menampilkan daftar publik terbaru; tombol Tukar Poin pada kartu lama selalu membuka data aktif terbaru. Item yang telah dihapus tidak muncul kembali saat bot restart.
+
+`/redeemqueue` menampilkan penukaran yang masih menunggu penyerahan. Pilih status dari dropdown `/redeemstatus`: **Sudah diserahkan** setelah barang diberikan, atau **Batalkan dan kembalikan poin** jika tidak dapat dipenuhi. Penyelesaian tidak memotong poin lagi. Pembatalan mengembalikan poin satu kali. Penukaran selesai/dibatalkan tidak bisa diubah lagi. Nomor `id` adalah nomor penukaran, bukan nomor item.
+
+### Saldo, penyimpanan, dan update
+
+Saldo `/point` dan leaderboard = poin event + kontribusi − pengurangan − harga redeem yang aktif/selesai. `/point` juga menampilkan **Redeem terpakai**. Jumlah event dan contribution tidak berkurang saat belanja; redeem tidak dihitung sebagai contribution.
+
+Nama/harga disimpan pada setiap penukaran sehingga perubahan katalog tidak mengubah pembelian lama. Saldo dicek dan penukaran ditulis dalam satu transaksi SQLite; dua konfirmasi bersamaan tidak bisa memakai saldo yang sama melebihi saldo tersedia. Tabel katalog, audit, dan penukaran menggunakan `DB_PATH` yang sama dengan data bot lainnya.
+
+Wipe dari console juga mereset pengeluaran redeem agar saldo kembali nol. Riwayat dan pesanan tetap tersimpan untuk penyerahan barang. Pembatalan pesanan yang biaya poinnya sudah di-wipe tidak mengembalikan poin lama; bot menampilkan pengembalian 0 poin. Pesanan baru setelah wipe memakai saldo baru secara normal.
+
+Update seluruh kode termasuk **`redeem.py` dan `redeem_store.py`**, lalu restart untuk sinkronisasi slash command dan pengisian katalog awal. Tidak ada env/dependency baru. Pertahankan `.env`, `DB_PATH`, dan folder `data/`. Dockerfile sudah menyertakan modul baru.
+
+Tes otomatis memeriksa katalog awal, perubahan katalog setelah restart, saldo/klik ganda, dua koneksi yang bertransaksi bersamaan, izin Administrator, privasi riwayat, pembatalan/refund, dan interaksi dengan wipe. Pemakaian langsung di Discord perlu diuji setelah bot di Wispbyte diperbarui.
+
 ## Referensi
 
 - https://discordpy.readthedocs.io/en/stable/ext/tasks/index.html
