@@ -115,7 +115,7 @@ class TrexBot(discord.Client):
             await interaction.followup.send('\n'.join(lines), ephemeral=True,
                                              allowed_mentions=discord.AllowedMentions.none())
 
-        @self.tree.command(name='jadwal', description='Lihat jadwal T-Rex berikutnya dan pengingat dalam WIB')
+        @self.tree.command(name='jadwal', description='Lihat jadwal world boss dan jam mulai spawn dalam WIB')
         @app_commands.guild_only()
         @app_commands.check(check_server)
         async def jadwal(interaction: discord.Interaction, halaman: app_commands.Range[int, 1, 10000] = 1):
@@ -130,14 +130,10 @@ class TrexBot(discord.Client):
                 lines = [f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**']
                 if event.place:
                     lines.append(f'Tempat: {display_place(event.place)}')
-                for offset in self.offsets:
-                    at = event.start - timedelta(minutes=offset)
-                    label = f'H-{offset}' if offset else 'Spawn dimulai'
-                    lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
+                lines.append(f'Spawn dimulai: {event.start:%d-%m %H:%M} WIB')
                 blocks.append('\n'.join(lines))
             if not events:
                 blocks.append('Belum ada jadwal aktif. Isi /worldbossregister index:<index> tempat:<pulau> waktu:<HH:MM>.')
-            blocks.append(f'\nPasangan tempat + index aktif: {len(events)}. Tempat: ' + ', '.join(WORLD_BOSS_PLACES) + '. Index 1.1–8.5 tersedia di setiap tempat.')
             pages, body = [], ''
             for block in blocks:
                 if body and len(body) + len(block) + 1 > 1750:
