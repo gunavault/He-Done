@@ -5,6 +5,7 @@ from datetime import datetime, date, timedelta
 
 from schedule import WIB, parse_time, SUPPORTED_INDICES
 from redeem_store import RedeemStoreMixin
+from salary_store import SalaryStoreMixin
 
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
@@ -31,7 +32,7 @@ def raid_time(jam, tanggal=None, now=None):
     return start
 
 
-class RaidStore(RedeemStoreMixin):
+class RaidStore(SalaryStoreMixin, RedeemStoreMixin):
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
@@ -90,6 +91,7 @@ class RaidStore(RedeemStoreMixin):
             );
         ''')
         self.init_redeem_tables()
+        self.init_salary_tables()
         with self.db:
             # Replace the old CHECK(points=1) without losing existing awards.
             schema = self.db.execute("SELECT sql FROM sqlite_master WHERE name='raid_points'").fetchone()[0]
@@ -295,8 +297,11 @@ class RaidStore(RedeemStoreMixin):
                 UNION ALL
                 SELECT user_id,-price,0 AS events,0 AS contributions FROM redeem_orders
                     WHERE guild_id=? AND voided=0 AND status IN ('pending','fulfilled')
+                UNION ALL
+                SELECT user_id,points,0 AS events,0 AS contributions FROM weekly_salary_payments
+                    WHERE guild_id=? AND voided=0
             ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
-            (str(guild_id), str(guild_id), str(guild_id), str(guild_id), page * 10)).fetchall()
+            (str(guild_id), str(guild_id), str(guild_id), str(guild_id), str(guild_id), page * 10)).fetchall()
 
     def point_summary(self, guild_id, user_id):
         return self.db.execute('''SELECT COALESCE(SUM(points),0) AS points,
@@ -317,7 +322,10 @@ class RaidStore(RedeemStoreMixin):
                 UNION ALL
                 SELECT -price,0 AS events,0 AS contributions,0 AS event_points,0 AS contribution_points,0 AS deduction_points,price AS redeem_points
                 FROM redeem_orders WHERE guild_id=? AND user_id=? AND voided=0 AND status IN ('pending','fulfilled')
-            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
+                UNION ALL
+                SELECT points,0,0,0,0,0,0 FROM weekly_salary_payments
+                    WHERE guild_id=? AND user_id=? AND voided=0
+            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
 
     def wipe_points(self, guild_id, actor_id, interaction_id):
         with self.db:
@@ -338,6 +346,7 @@ class RaidStore(RedeemStoreMixin):
             self.db.execute('UPDATE raid_contributions SET voided=1 WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE raid_deductions SET voided=1 WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE redeem_orders SET voided=1 WHERE guild_id=?', (str(guild_id),))
+            self.db.execute('UPDATE weekly_salary_payments SET voided=1 WHERE guild_id=?', (str(guild_id),))
             cur = self.db.execute('''INSERT INTO raid_point_resets
                 (interaction_id,guild_id,actor_id,created_at,event_awards,contributions,deductions,redemptions)
                 VALUES(?,?,?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
