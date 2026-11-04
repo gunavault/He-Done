@@ -15,6 +15,7 @@ from voice_alerts import VoiceAnnouncer
 from raids import RaidService, index_autocomplete
 from console_commands import ConsoleCommands
 from redeem import RedeemService
+from salary import SalaryService
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -51,6 +52,7 @@ class TrexBot(discord.Client):
         self.register_commands()
         self.raids = RaidService(self, path)
         self.redeem = RedeemService(self)
+        self.salary = SalaryService(self)
         self.console = ConsoleCommands(self.raids)
 
     def require_timer_role(self, interaction):
@@ -315,6 +317,7 @@ class TrexBot(discord.Client):
     async def notify(self):
         if self.is_ready():
             await self.deliver_due()
+            await self.salary.tick()
 
     @notify.before_loop
     async def before_notify(self):
