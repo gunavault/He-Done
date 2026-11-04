@@ -74,9 +74,16 @@ class SalaryService:
                 row = self.store.salary_set(self.guild_id, user.id, point, details, interaction.user.id,
                                             hour=self.hour)
             safe = discord.utils.escape_markdown(discord.utils.escape_mentions(row['detail']))
+            first_line = (
+                f'💰 **Pembayaran pertama langsung masuk: +{row["points"]} poin.**'
+                if row['first_payment']
+                else '✅ Jadwal gaji disimpan; tidak ada pembayaran awal kedua.'
+            )
             await interaction.response.send_message(
-                f'✅ Gaji <@{user.id}>: **{row["points"]} poin setiap Sabtu**.\n'
-                f'Detail: {safe}\nMulai periode: **{row["effective_payday"]}** WIB · jam {self.hour:%H:%M}.',
+                f'{first_line}\n'
+                f'Penerima: <@{user.id}> · Gaji: **{row["points"]} poin per Sabtu**.\n'
+                f'Detail: {safe}\nPembayaran rutin berikutnya: '
+                f'**{row["effective_payday"]}** pukul {self.hour:%H:%M} WIB.',
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
         @self.bot.tree.command(name='gajian', description='Lihat seluruh penerima gaji mingguan aktif')
