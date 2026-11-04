@@ -80,7 +80,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.user.roles = [SimpleNamespace(id=self.bot.role_id)]
         with patch('bot.datetime') as clock:
             clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            await self.bot.tree.get_command('worldbossregister').callback(interaction, index=index, waktu=waktu)
+            await self.bot.tree.get_command('worldbossregister').callback(interaction, index=index, tempat='Gurun', waktu=waktu)
         return interaction
 
     async def test_update_replaces_reminders_and_survives_restart(self):
@@ -123,7 +123,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await callback(interaction, index='3.1')
         with self.assertRaises(app_commands.CheckFailure):
-            await callback(interaction, index='3.1', waktu='11:20')
+            await callback(interaction, index='3.1', tempat='Gurun', waktu='11:20')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
 
     async def test_timer_edit_requires_exact_env_role_even_for_admins(self):
@@ -135,7 +135,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         for roles in ([], [SimpleNamespace(id=111, name='Hunter')]):
             interaction.user.roles = roles
             with self.assertRaisesRegex(app_commands.CheckFailure, 'ROLE_ID'):
-                await callback(interaction, index='3.1', waktu='11:20')
+                await callback(interaction, index='3.1', tempat='Gurun', waktu='11:20')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
         interaction.followup.send.assert_not_awaited()
 
@@ -185,8 +185,9 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_new_indices_choices_updates_delivery_and_restart(self):
         command = self.bot.tree.get_command('worldbossregister')
-        choices = next(p for p in command.parameters if p.name == 'index').choices
-        self.assertEqual([choice.value for choice in choices], ['3.1', '3.2', '4.1', '4.3'])
+        parameter = next(p for p in command.parameters if p.name == 'index')
+        self.assertEqual(parameter.choices, [])
+        self.assertTrue(parameter.autocomplete)
         await self.update_timer(index='4.3', waktu='08:20')
         await self.update_timer(index='4.1', waktu='08:30')
         timers = {timer.index: timer for timer in self.bot.store.timers(self.bot.guild_id)}
@@ -209,14 +210,16 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
-        self.assertIn('Index belum diisi: 4.1, 4.3', interaction.response.send_message.call_args.args[0])
+        self.assertIn('4.1, 4.2, 4.3', interaction.response.send_message.call_args.args[0])
         await self.update_timer(index='4.3', waktu='08:20')
         await self.update_timer(index='4.1', waktu='08:30')
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 20, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
         message = interaction.response.send_message.call_args.args[0]
-        self.assertNotIn('Index belum diisi', message)
+        self.assertIn('Index belum diisi', message)
+        self.assertNotIn('4.1,', message.split('Index belum diisi: ')[1])
+        self.assertNotIn('4.3,', message.split('Index belum diisi: ')[1])
         self.assertEqual(message.count('**Index'), 6)
         for index in ('3.1', '3.2', '4.1', '4.3'):
             self.assertIn(f'**Index {index}', message)
@@ -226,6 +229,32 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         if tasks:
             import asyncio
             await asyncio.gather(*tasks)
+
+    async def test_register_place_autocomplete_and_paged_40_index_schedule(self):
+        from schedule import SUPPORTED_INDICES
+        from raids import index_autocomplete
+        self.assertEqual([x.value for x in await index_autocomplete(None, '8.')], ['8.1', '8.2', '8.3', '8.4', '8.5'])
+        self.assertLessEqual(len(await index_autocomplete(None, '')), 25)
+        command = self.bot.tree.get_command('worldbossregister')
+        self.assertEqual([p.name for p in command.parameters], ['index', 'tempat', 'waktu', 'tanggal'])
+        for index in SUPPORTED_INDICES:
+            await self.update_timer(index=index)
+        timers = self.bot.store.timers(self.bot.guild_id)
+        self.assertEqual(len(timers), 40)
+        self.assertTrue(all(t.place == 'Gurun' for t in timers))
+        interaction = AsyncMock()
+        for page in range(1, 20):
+            with patch('bot.datetime') as clock:
+                clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+                try:
+                    await self.bot.tree.get_command('jadwal').callback(interaction, halaman=page)
+                except ValueError:
+                    break
+            message = interaction.response.send_message.call_args.args[0]
+            self.assertLessEqual(len(message), 2000)
+            if page == 1:
+                self.assertIn('Tempat: Gurun', message)
+        self.assertGreater(interaction.response.send_message.await_count, 1)
 
     async def test_voice_receipt_prevents_duplicates_independently_of_text(self):
         self.bot.voice.channel_id = 888

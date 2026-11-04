@@ -8,7 +8,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, Mock, patch
 
 import discord
-from schedule import daily_reminders, Reminder, SUPPORTED_INDICES
+from schedule import daily_reminders, Reminder, SUPPORTED_INDICES, VOICE_INDICES
 from voice_alerts import VoiceAnnouncer, RECORDINGS
 
 
@@ -178,8 +178,8 @@ class VoiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_all_eight_recording_mappings_and_files(self):
         start = daily_reminders(date(2026, 10, 30))[0].start
-        self.assertEqual(len(RECORDINGS), 12)
-        for index in SUPPORTED_INDICES:
+        self.assertEqual(len(RECORDINGS), 48)
+        for index in VOICE_INDICES:
             for offset in (30, 15):
                 reminder = Reminder(index, start, offset)
                 path = self.announcer.recording_for(reminder)

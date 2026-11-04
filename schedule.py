@@ -7,11 +7,17 @@ import math
 import sqlite3
 
 WIB = ZoneInfo('Asia/Jakarta')
-SUPPORTED_INDICES = ('3.1', '3.2', '4.1', '4.3')
+SUPPORTED_INDICES = tuple(f'{main}.{sub}' for main in range(1, 9) for sub in range(1, 6))
+VOICE_INDICES = ('3.1', '3.2', '4.1', '4.3')
 DEFAULT_SLOTS = (('3.1', time(11, 20)), ('3.2', time(12, 47)),
                  ('3.1', time(18, 0)), ('3.2', time(19, 27)))
 DEFAULT_OFFSETS = (30, 15, 5, 0)
 GRACE_SECONDS = 60
+
+
+def display_place(value):
+    value = value.replace('\\', '\\\\').replace('@', '@\u200b')
+    return re.sub(r'([`*_~|<>])', r'\\\1', value)
 
 
 def parse_time(value):
@@ -43,6 +49,7 @@ class Reminder:
     start: datetime
     minutes_before: int
     end: datetime | None = None
+    place: str = ''
 
     @property
     def trigger(self):
@@ -62,7 +69,8 @@ class Reminder:
                   if self.end else f'{self.start:%H:%M} WIB')
         return (f'🦖 **T-Rex — Index {self.index} | {label}**\n'
                 f'Perkiraan spawn T-Rex: **{window}**.\n'
-                f'Tanggal spawn: {self.start:%d-%m-%Y}'
+                + (f'Tempat: {display_place(self.place)}\n' if self.place else '')
+                + f'Tanggal spawn: {self.start:%d-%m-%Y}'
                 + (f'–{self.end:%d-%m-%Y}' if self.end and self.end.date() != self.start.date() else ''))
 
 
@@ -81,11 +89,15 @@ class Timer:
     observed: datetime
     start: datetime
     end: datetime
+    place: str = ''
 
 
-def calculate_timer(index, waktu, tanggal=None, now=None):
+def calculate_timer(index, waktu, tanggal=None, now=None, place=''):
     if index not in SUPPORTED_INDICES:
-        raise ValueError('Index harus salah satu dari: ' + ', '.join(SUPPORTED_INDICES) + '.')
+        raise ValueError('Index harus 1.1–8.5: angka utama 1–8 dan sub-index .1–.5.')
+    place = ' '.join(place.split())
+    if len(place) > 100:
+        raise ValueError('Tempat maksimal 100 karakter.')
     now = (now or datetime.now(WIB)).astimezone(WIB)
     at = parse_time(waktu)
     day = now.date()
@@ -99,7 +111,7 @@ def calculate_timer(index, waktu, tanggal=None, now=None):
     observed = datetime.combine(day, at, tzinfo=WIB)
     if observed > now:
         raise ValueError('Waktu muncul belum terjadi. Untuk kemarin, isi tanggal:YYYY-MM-DD.')
-    return Timer(index, observed, observed + timedelta(minutes=400), observed + timedelta(minutes=420))
+    return Timer(index, observed, observed + timedelta(minutes=400), observed + timedelta(minutes=420), place)
 
 
 def effective_reminders(day, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timers=()):
@@ -111,7 +123,7 @@ def effective_reminders(day, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timer
         if start < timer.start:
             continue  # Don't invent an earlier occurrence before the first calculated window.
         end = start + (timer.end - timer.start)
-        events.extend(Reminder(timer.index, start, offset, end) for offset in offsets)
+        events.extend(Reminder(timer.index, start, offset, end, timer.place) for offset in offsets)
     return sorted(events, key=lambda event: event.trigger)
 
 
@@ -141,7 +153,8 @@ def next_spawn_message(now, slots=DEFAULT_SLOTS, timers=()):
               if event.end else f'{event.start:%H:%M} WIB')
     return (f'🦖 **Jadwal T-Rex terdekat**\n'
             f'Index: **{event.index}**\n'
-            f'Spawn: **{window}**\n'
+            + (f'Tempat: {display_place(event.place)}\n' if event.place else '')
+            + f'Spawn: **{window}**\n'
             f'Tanggal: {day}, {event.start:%d-%m-%Y}\n'
             f'Sisa waktu: **{remaining}**')
 
@@ -164,18 +177,21 @@ class Store:
         self.db.execute('''CREATE TABLE IF NOT EXISTS timer_overrides (
             guild_id TEXT NOT NULL, idx TEXT NOT NULL, observed TEXT NOT NULL,
             start TEXT NOT NULL, end TEXT NOT NULL, PRIMARY KEY (guild_id, idx))''')
+        if 'place' not in {row[1] for row in self.db.execute('PRAGMA table_info(timer_overrides)')}:
+            self.db.execute("ALTER TABLE timer_overrides ADD COLUMN place TEXT NOT NULL DEFAULT ''")
         self.db.commit()
 
     def set_timer(self, guild_id, timer):
         with self.db:
-            self.db.execute('INSERT OR REPLACE INTO timer_overrides VALUES (?, ?, ?, ?, ?)',
+            self.db.execute('''INSERT OR REPLACE INTO timer_overrides
+                            (guild_id,idx,observed,start,end,place) VALUES (?, ?, ?, ?, ?, ?)''',
                             (str(guild_id), timer.index, timer.observed.isoformat(),
-                             timer.start.isoformat(), timer.end.isoformat()))
+                             timer.start.isoformat(), timer.end.isoformat(), timer.place))
 
     def timers(self, guild_id):
-        rows = self.db.execute('SELECT idx, observed, start, end FROM timer_overrides WHERE guild_id=?',
+        rows = self.db.execute('SELECT idx, observed, start, end, place FROM timer_overrides WHERE guild_id=?',
                                (str(guild_id),)).fetchall()
-        return tuple(Timer(row[0], *(datetime.fromisoformat(value) for value in row[1:])) for row in rows)
+        return tuple(Timer(row[0], *(datetime.fromisoformat(value) for value in row[1:4]), row[4]) for row in rows)
 
     def was_sent(self, key):
         return self.db.execute('SELECT 1 FROM deliveries WHERE event_key=?', (key,)).fetchone() is not None

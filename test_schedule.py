@@ -104,7 +104,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_new_indices_are_inactive_until_configured_and_have_separate_timers(self):
         now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-        self.assertEqual(SUPPORTED_INDICES, ('3.1', '3.2', '4.1', '4.3'))
+        self.assertEqual(SUPPORTED_INDICES, tuple(f'{i}.{j}' for i in range(1, 9) for j in range(1, 6)))
         defaults = effective_reminders(now.date())
         self.assertFalse([e for e in defaults if e.index in ('4.1', '4.3')])
         timers = (calculate_timer('4.3', '08:20', now=now),
@@ -126,7 +126,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_timer_validation_and_previous_day(self):
         now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
-        for args in [('3.3', '00:00', None), ('3.1', '24:00', None),
+        for args in [('9.1', '00:00', None), ('3.1', '24:00', None),
                      ('3.1', '11:20', None), ('3.1', '00:00', '2026-02-30'),
                      ('3.1', '00:00', '30-10-2026')]:
             with self.assertRaises(ValueError):
@@ -134,6 +134,36 @@ class ScheduleTests(unittest.TestCase):
         timer = calculate_timer('3.1', '23:20', '2026-10-30', now=now)
         self.assertEqual(timer.start.hour, 6)
         self.assertEqual(timer.observed.date(), date(2026, 10, 30))
+
+    def test_all_40_indices_place_and_legacy_database_upgrade(self):
+        import sqlite3
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        for index in SUPPORTED_INDICES:
+            timer = calculate_timer(index, '11:20', now=now, place='  Gurun   Timur  ')
+            self.assertEqual(timer.place, 'Gurun Timur')
+            events = effective_reminders(now.date(), slots=(), timers=(timer,))
+            self.assertEqual(events[0].place, 'Gurun Timur')
+            self.assertIn('Tempat: Gurun Timur', events[0].message())
+            self.assertIn('Gurun Timur', next_spawn_message(now, slots=(), timers=(timer,)))
+        for index in ('0.1', '9.1', '1.0', '8.6', '1', '1.01', '1.1.1'):
+            with self.assertRaises(ValueError):
+                calculate_timer(index, '11:20', now=now, place='Gurun')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'legacy.sqlite3'
+            old_timer = calculate_timer('3.1', '11:20', now=now)
+            with sqlite3.connect(path) as db:
+                db.execute('''CREATE TABLE timer_overrides (guild_id TEXT,idx TEXT,
+                    observed TEXT,start TEXT,end TEXT,PRIMARY KEY(guild_id,idx))''')
+                db.execute('INSERT INTO timer_overrides VALUES(?,?,?,?,?)',
+                           ('123', '3.1', old_timer.observed.isoformat(), old_timer.start.isoformat(), old_timer.end.isoformat()))
+            store = Store(path)
+            self.assertEqual(store.timers(123), (old_timer,))
+            timer = calculate_timer('8.5', '11:20', now=now, place='Savana')
+            store.set_timer(123, timer)
+            store.close()
+            store = Store(path)
+            self.assertEqual({t.index: t.place for t in store.timers(123)}, {'3.1': '', '8.5': 'Savana'})
+            store.close()
 
     def test_updated_window_remains_visible_until_end(self):
         timer = calculate_timer('3.1', '11:20', now=datetime(2026, 10, 30, 13, 0, tzinfo=WIB))

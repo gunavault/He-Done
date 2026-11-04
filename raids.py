@@ -15,6 +15,12 @@ EVENT_STATUSES = {'publishing': 'Menerbitkan', 'open': 'Terbuka',
                   'completed': 'Selesai', 'cancelled': 'Dibatalkan', 'failed': 'Gagal terbit'}
 
 
+async def index_autocomplete(interaction, current):
+    prefix = current.strip()
+    return [app_commands.Choice(name=index, value=index)
+            for index in SUPPORTED_INDICES if index.startswith(prefix)][:25]
+
+
 def event_embed(event, participants):
     title = KINDS[event['kind']]
     if event['idx']:
@@ -307,7 +313,7 @@ class RaidService:
         @self.bot.tree.command(name='worldbossraid', description='Leader membuat pendaftaran raid T-Rex manual; tidak mengubah timer')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        @app_commands.choices(index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
+        @app_commands.autocomplete(index=index_autocomplete)
         @app_commands.describe(jam='Jam mulai HH:MM WIB', tempat='Lokasi raid', index='Index T-Rex',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
         async def worldbossraid(interaction: discord.Interaction, jam: str, tempat: str, index: str, tanggal: str | None = None):

@@ -6,13 +6,13 @@ import os
 from pathlib import Path
 
 import discord
-from schedule import SUPPORTED_INDICES
+from schedule import SUPPORTED_INDICES, VOICE_INDICES
 
 log = logging.getLogger('trex.voice')
 
 
 RECORDINGS = {(index, minutes): f'{index.replace(".", "_")}_h{minutes}.mp3'
-              for index in SUPPORTED_INDICES for minutes in (30, 15)}
+              for index in VOICE_INDICES for minutes in (30, 15)}
 RECORDINGS.update({(index, 0): "spawn.mp3" for index in SUPPORTED_INDICES})
 
 
@@ -72,7 +72,7 @@ class VoiceAnnouncer:
         if reminder is None:
             return self.audio_dir / 'test.mp3'
         if not self.supports(reminder):
-            raise ValueError('Rekaman voice tersedia hanya untuk index 3.1, 3.2, 4.1, 4.3 pada H-30/H-15/H-0.')
+            raise ValueError('H-30/H-15 tersedia untuk index 3.1, 3.2, 4.1, 4.3; H-0 untuk semua index 1.1–8.5.')
         return self.audio_dir / RECORDINGS[(reminder.index, reminder.minutes_before)]
 
     def audio_source(self, path):

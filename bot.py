@@ -9,10 +9,10 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES, Reminder
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES, VOICE_INDICES, Reminder, display_place
 
 from voice_alerts import VoiceAnnouncer
-from raids import RaidService
+from raids import RaidService, index_autocomplete
 from console_commands import ConsoleCommands
 from redeem import RedeemService
 
@@ -74,24 +74,26 @@ class TrexBot(discord.Client):
         @self.tree.command(name='worldbossregister', description='Lihat spawn terdekat atau perbarui timer index dengan index dan waktu')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        @app_commands.choices(index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
-        @app_commands.describe(index='Index yang timernya diperbarui', waktu='Waktu terakhir muncul, HH:MM WIB',
+        @app_commands.autocomplete(index=index_autocomplete)
+        @app_commands.describe(index='Index 1.1–8.5; ketik angka utama untuk memilih', tempat='Lokasi world boss, maksimal 100 karakter', waktu='Waktu terakhir muncul, HH:MM WIB',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
         async def worldbossregister(interaction: discord.Interaction, index: str | None = None,
-                       waktu: str | None = None, tanggal: str | None = None):
-            if index is None and waktu is None and tanggal is None:
+                       tempat: str | None = None, waktu: str | None = None, tanggal: str | None = None):
+            if index is None and tempat is None and waktu is None and tanggal is None:
                 await interaction.response.send_message(
                     next_spawn_message(datetime.now(WIB), self.slots, self.store.timers(self.guild_id)),
                     allowed_mentions=discord.AllowedMentions.none())
                 return
-            if index is None or waktu is None:
-                raise ValueError('Untuk update, isi keduanya: /worldbossregister index:3.1 waktu:11:20. Tanpa opsi untuk melihat jadwal.')
+            if index is None or tempat is None or waktu is None:
+                raise ValueError('Untuk update, isi index, tempat, dan waktu: /worldbossregister index:3.1 tempat:Gurun waktu:11:20. Tanpa opsi untuk melihat jadwal.')
+            if not tempat.strip():
+                raise ValueError('Tempat wajib diisi.')
             self.require_timer_role(interaction)
             await interaction.response.defer(ephemeral=True)
             # The same lock is held by the sender: no old timer can be queued after this update.
             async with self.lock:
                 now = datetime.now(WIB)
-                timer = calculate_timer(index, waktu, tanggal, now)
+                timer = calculate_timer(index, waktu, tanggal, now, place=tempat)
                 self.store.set_timer(self.guild_id, timer)
                 events = [event for delta in (0, 1)
                           for event in effective_reminders(now.date() + timedelta(days=delta),
@@ -99,6 +101,7 @@ class TrexBot(discord.Client):
                           if event.index == index and (event.start >= now or event.end > now)]
                 event = min(events, key=lambda event: event.start)
             lines = [f'✅ Timer index **{index}** diperbarui.',
+                     f'Tempat: {display_place(timer.place)}',
                      f'Terakhir muncul: {timer.observed:%d-%m-%Y %H:%M} WIB',
                      f'Perkiraan spawn berikut: **{event.start:%d-%m-%Y %H:%M}–{event.end:%H:%M} WIB**']
             for offset in self.offsets:
@@ -113,27 +116,41 @@ class TrexBot(discord.Client):
         @self.tree.command(name='jadwal', description='Lihat jadwal T-Rex berikutnya dan pengingat dalam WIB')
         @app_commands.guild_only()
         @app_commands.check(check_server)
-        async def jadwal(interaction: discord.Interaction):
+        async def jadwal(interaction: discord.Interaction, halaman: app_commands.Range[int, 1, 10000] = 1):
             now = datetime.now(WIB)
             timers = self.store.timers(self.guild_id)
             events = [event for delta in (0, 1)
                       for event in effective_reminders(now.date() + timedelta(days=delta),
                           self.slots, (0,), timers) if event.start >= now or (event.end and event.end > now)]
-            lines = ['🦖 **Jadwal berikutnya — WIB, berulang setiap hari**']
+            blocks = []
             overridden = {timer.index for timer in timers}
             daily_count = sum(index not in overridden for index, _ in self.slots) + len(timers)
             for event in sorted(events, key=lambda event: event.start)[:daily_count]:
                 window = f'{event.start:%H:%M}' + (f'–{event.end:%H:%M}' if event.end else '')
-                lines.append(f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**')
+                lines = [f'\n**Index {event.index} — {event.start:%d-%m} {window} WIB**']
+                if event.place:
+                    lines.append(f'Tempat: {display_place(event.place)}')
                 for offset in self.offsets:
                     at = event.start - timedelta(minutes=offset)
                     label = f'H-{offset}' if offset else 'Spawn dimulai'
                     lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
+                blocks.append('\n'.join(lines))
             active_indices = {index for index, _ in self.slots} | overridden
             unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
             if unconfigured:
-                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> waktu:<HH:MM>.')
-            await interaction.response.send_message('\n'.join(lines), ephemeral=True)
+                blocks.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> tempat:<lokasi> waktu:<HH:MM>.')
+            pages, body = [], ''
+            for block in blocks:
+                if body and len(body) + len(block) + 1 > 1750:
+                    pages.append(body)
+                    body = ''
+                body += '\n' + block
+            pages.append(body or 'Belum ada jadwal.')
+            if halaman > len(pages):
+                raise ValueError(f'Halaman tidak tersedia. Ada {len(pages)} halaman jadwal.')
+            header = f'🦖 **Jadwal berikutnya — WIB, berulang setiap hari** · halaman {halaman}/{len(pages)}'
+            await interaction.response.send_message(header + pages[halaman - 1], ephemeral=True,
+                                                    allowed_mentions=discord.AllowedMentions.none())
 
         @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')
         @app_commands.guild_only()
@@ -151,7 +168,7 @@ class TrexBot(discord.Client):
         @app_commands.checks.has_permissions(manage_guild=True)
         @app_commands.check(check_server)
         @app_commands.choices(
-            index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES],
+            index=[app_commands.Choice(name=x, value=x) for x in VOICE_INDICES],
             menit=[app_commands.Choice(name='H-30 menit', value=30),
                    app_commands.Choice(name='H-15 menit', value=15),
                    app_commands.Choice(name='Saat spawn (H-0)', value=0)])
