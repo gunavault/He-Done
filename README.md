@@ -288,7 +288,7 @@ Kartu hanya menampilkan **Menunggu diterima**, **Hadir**, dan **Tidak Hadir**.
 - **Daftar:** masuk Menunggu diterima. Belum mendapat poin. Klik berulang tidak menggandakan entri; peserta berstatus Hadir tetap Hadir.
 - **Tidak Hadir:** menyatakan tidak ikut/membatalkan pendaftaran. Jika sebelumnya Hadir, poin event ini langsung ditarik. Bisa Daftar lagi, tetapi perlu diterima ulang.
 - **Kelola — Leader:** panel privat dengan menu peserta, **Hadir**, dan **Tidak Hadir**. Ada navigasi halaman untuk lebih dari 25 peserta.
-- **Hadir:** langsung mengubah status menjadi Hadir dan menambah poin sesuai jenis raid: **T-Rex 2**, **Savage 3**, **Rift 1**, tanpa menunggu jam event atau Selesaikan Event. Satu peserta hanya mendapat satu pemberian poin per event, termasuk jika tombol ditekan berulang.
+- **Hadir:** langsung mengubah status menjadi Hadir dan menambah poin sesuai jenis raid: **World Boss/T-Rex 40**, **War di Savage 50**, **Rift 35**, tanpa menunggu jam event atau Selesaikan Event. Satu peserta hanya mendapat satu pemberian poin per event, termasuk jika tombol ditekan berulang.
 - Leader dapat menandai peserta **Tidak Hadir** untuk membatalkan penerimaan dan menarik poin. Peserta perlu memilih Daftar lagi sebelum diterima ulang.
 - **Selesaikan Event:** menutup perubahan daftar dan mempertahankan poin yang sudah tercatat, tanpa memberi poin tambahan. Tersedia mulai jam event. Ada konfirmasi sebelum penutupan; periksa daftar dahulu.
 - **Batalkan Event:** menutup event dan menarik semua poin event ini, tanpa memengaruhi poin dari event lain.
@@ -306,9 +306,9 @@ Leader tidak mendapat poin otomatis karena membuat event. Leader/role pengelola 
 
 `user` memilih satu anggota server (bukan bot), `point` bilangan bulat positif 1–1000000, dan `detail` wajib 1–500 karakter setelah spasi tepi dibuang. Perintah dapat dijalankan di channel mana pun pada server yang dikonfigurasi. Respons pemberian poin dikirim **publik pada channel tempat perintah dijalankan**, dengan mention role `ROLE_ID` seperti notifikasi T-Rex. Semua anggota yang punya akses ke channel itu dapat melihatnya. Pastikan role mentionable atau bot punya izin mention role, sama seperti konfigurasi pengingat T-Rex. Teks detail tidak dapat memicu ping tambahan. Perubahan ini berlaku untuk pesan `/addpoint` baru; pesan privat lama tidak berubah. ID kontribusi, penerima, jumlah poin, detail, pemberi, waktu, dan ID interaksi Discord disimpan di tabel `raid_contributions`. Tidak ada fitur ubah/hapus kontribusi pada versi ini.
 
-Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh Hadir pada satu T-Rex (2), satu Savage (3), dan satu Rift (1), ditambah satu `/addpoint` 5 poin:
+Satu `/addpoint` = satu contribution, berapa pun poinnya. Contoh Hadir pada satu World Boss/T-Rex (40), satu War di Savage (50), dan satu Rift (35), ditambah satu `/addpoint` 5 poin:
 
-> 1. **@C. Ago** — **11 poin** · 3 event, 1 contribution
+> 1. **@C. Ago** — **130 poin** · 3 event, 1 contribution
 
 Anggota yang hanya punya poin kontribusi tetap masuk leaderboard dengan 0 event. Poin kontribusi tidak ditarik jika peserta memilih Tidak Hadir atau suatu raid dibatalkan. Pengiriman ulang interaksi Discord yang sama tidak menggandakan pemberian; menjalankan perintah baru adalah kontribusi baru.
 
@@ -341,7 +341,7 @@ Jika hosting tidak menyediakan stdin untuk proses bot, startup mencatat `Input c
 
 ### Data dan restart
 
-`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu pemberian poin per anggota per event, dengan bobot menurut jenis raid. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai dihitung ulang sesuai bobot T-Rex 2, Savage 3, Rift 1, tanpa menggandakan jumlah event. Catatan poin yang sudah di-wipe dikecualikan agar tidak muncul lagi. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.
+`raid_events`, `raid_participants`, `raid_points`, dan `raid_audit` disimpan pada database `DB_PATH` yang sama. Poin disimpan per event dan Discord user ID, bukan nama, sehingga perubahan nickname tidak mengubah total. Ledger membatasi satu pemberian poin per anggota per event, dengan bobot menurut jenis raid. Perubahan status beserta penambahan/penarikan poin dilakukan dalam satu transaksi. Saat update dari versi lama, Hadir disahkan menjadi Hadir; Ditolak/Tidak datang menjadi Tidak Hadir. Peserta Hadir pada event terbuka/selesai dihitung ulang sesuai bobot World Boss/T-Rex 40, War di Savage 50, Rift 35, tanpa menggandakan jumlah event. Catatan poin yang sudah di-wipe dikecualikan agar tidak muncul lagi. Event batal tidak mendapat poin. `/leaderboard` menghitung total poin semua jenis raid dan kontribusi manual untuk server ini, 10 anggota per halaman. Jumlah event hanya menghitung poin raid; jumlah contribution hanya menghitung transaksi `/addpoint`.
 
 Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online untuk memproses klik; saat offline Discord akan menampilkan kegagalan interaksi. Setelah bot aktif, coba klik kembali. Event tertutup tetap dapat dilihat dengan `/raid`, tetapi tidak menerima perubahan. Jika perubahan kartu gagal akibat izin/jaringan, data tetap tersimpan dan respons mengarahkan ke `/raid event:<nomor>`.
 
@@ -349,7 +349,7 @@ Tombol event terbuka dipulihkan dari database ketika startup. Bot harus online u
 
 1. Gunakan channel uji dan role leader milikmu, lalu buat `/rift` dengan jam WIB beberapa menit ke depan.
 2. Dari akun peserta, coba **Daftar**, lalu **Tidak Hadir**, lalu **Daftar** lagi.
-3. Leader membuka Kelola, memilih peserta, dan klik Hadir. `/leaderboard` langsung bertambah 1 poin. Klik Hadir lagi untuk memastikan poin tetap 1.
+3. Leader membuka Kelola, memilih peserta, dan klik Hadir. `/leaderboard` langsung bertambah 35 poin. Klik Hadir lagi untuk memastikan poin tetap 35.
 4. Restart bot selagi event terbuka dan coba tombol/panel lagi.
 5. Coba Tidak Hadir untuk menarik poin, lalu Daftar dan Hadir ulang. Setelah jam event, Selesaikan Event dan konfirmasi: total poin tetap sama, tidak bertambah lagi.
 6. Untuk membersihkan poin event uji yang masih terbuka, gunakan Batalkan Event. Reset seluruh poin server tersedia hanya melalui console hosting seperti dijelaskan di bawah.

@@ -59,14 +59,14 @@ class RaidStoreTests(unittest.TestCase):
         self.store.respond(123, self.event_id, 4, 'P4', False)
         self.moderate(5, 'absent')
         self.assertEqual(self.store.finish(123, self.event_id, 789, now=NOW), 2)
-        self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 2), ('2', 2)])
+        self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 40), ('2', 40)])
         self.store.close()
         self.store = RaidStore(self.path)
         with self.assertRaises(ValueError):
             self.store.finish(123, self.event_id, 789, now=NOW)
         with self.assertRaises(ValueError):
             self.signup()
-        self.assertEqual(self.store.leaderboard(123)[0]['points'], 2)
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 40)
         self.assertEqual(self.store.open_events(123), [])
 
     def test_different_event_each_gives_one_point_and_guilds_are_isolated(self):
@@ -78,7 +78,7 @@ class RaidStoreTests(unittest.TestCase):
         self.store.respond(123, other, 1, 'Player', True)
         self.store.moderate(123, other, 1, 789, 'accepted', NOW)
         self.store.finish(123, other, 789, now=NOW)
-        self.assertEqual(self.store.leaderboard(123)[0]['points'], 3)
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 75)
         self.assertEqual(self.store.leaderboard(124), [])
         with self.assertRaises(ValueError):
             self.store.respond(124, other, 2, 'Other guild', True)
@@ -93,7 +93,7 @@ class RaidStoreTests(unittest.TestCase):
     def test_accept_before_start_absence_reverses_points_and_rejoin_needs_accept(self):
         self.signup()
         self.moderate(1, 'accepted', NOW - timedelta(minutes=1))
-        self.assertEqual(self.store.leaderboard(123)[0]['points'], 2)
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 40)
         self.store.respond(123, self.event_id, 1, 'Player', False)
         self.assertEqual(self.store.leaderboard(123), [])
         with self.assertRaises(ValueError):
@@ -101,7 +101,7 @@ class RaidStoreTests(unittest.TestCase):
         self.signup()
         self.assertEqual(self.store.leaderboard(123), [])
         self.moderate(1, 'accepted')
-        self.assertEqual(self.store.leaderboard(123)[0]['points'], 2)
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 40)
         self.moderate(1, 'absent')
         self.assertEqual(self.store.leaderboard(123), [])
         self.assertEqual(self.store.participants(self.event_id)[0]['verified_by'], '789')
@@ -120,7 +120,7 @@ class RaidStoreTests(unittest.TestCase):
             self.store = RaidStore(self.path)
             self.assertEqual([p['status'] for p in self.store.participants(self.event_id)],
                              ['accepted', 'accepted', 'absent', 'absent'])
-            self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 2), ('2', 2)])
+            self.assertEqual([(r['user_id'], r['points']) for r in self.store.leaderboard(123)], [('1', 40), ('2', 40)])
 
     def test_existing_timers_and_receipts_preserved_in_same_database(self):
         timers = Store(self.path)
@@ -141,7 +141,7 @@ class RaidStoreTests(unittest.TestCase):
         try:
             with self.assertRaises(ValueError):
                 second.finish(123, self.event_id, 789, now=NOW)
-            self.assertEqual(second.leaderboard(123)[0]['points'], 2)
+            self.assertEqual(second.leaderboard(123)[0]['points'], 40)
         finally:
             second.close()
 
@@ -158,13 +158,13 @@ class RaidStoreTests(unittest.TestCase):
         receipt = self.store.add_contribution(123, 1, 5, 'Membantu material', 99, 'interaction-1')
         self.assertEqual(receipt, self.store.add_contribution(123, 1, 5, 'Membantu material', 99, 'interaction-1'))
         row = self.store.leaderboard(123)[0]
-        self.assertEqual((row['points'], row['events'], row['contributions']), (7, 1, 1))
+        self.assertEqual((row['points'], row['events'], row['contributions']), (45, 1, 1))
         self.store.add_contribution(123, 1, 2, 'Membantu transport', 99, 'interaction-2')
         self.store.add_contribution(124, 1, 100, 'Other server', 99, 'interaction-3')
         self.store.close()
         self.store = RaidStore(self.path)
         row = self.store.leaderboard(123)[0]
-        self.assertEqual((row['points'], row['events'], row['contributions']), (9, 1, 2))
+        self.assertEqual((row['points'], row['events'], row['contributions']), (47, 1, 2))
         detail = self.store.db.execute('SELECT * FROM raid_contributions WHERE id=?', (receipt,)).fetchone()
         self.assertEqual((detail['detail'], detail['actor_id']), ('Membantu material', '99'))
         # Cancelling a raid must never delete an independent contribution.
@@ -191,7 +191,7 @@ class RaidStoreTests(unittest.TestCase):
         self.store.add_contribution(123, 2, 20, 'Other user', 99, 'summary-2')
         self.store.add_contribution(124, 1, 100, 'Other server', 99, 'summary-3')
         self.assertEqual(dict(self.store.point_summary(123, 1)),
-                         dict(points=7, events=1, contributions=1, event_points=2, contribution_points=5))
+                         dict(points=45, events=1, contributions=1, event_points=40, contribution_points=5))
         self.store.respond(123, self.event_id, 1, 'Player', False)
         self.assertEqual(dict(self.store.point_summary(123, 1)),
                          dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5))
@@ -205,7 +205,7 @@ class RaidStoreTests(unittest.TestCase):
         for eid in ids:
             self.store.respond(123, eid, 1, 'Player', True)
             self.store.moderate(123, eid, 1, 789, 'accepted')
-        self.assertEqual([self.store.event_credit(123, eid, 1) for eid in ids], [2, 3, 1])
+        self.assertEqual([self.store.event_credit(123, eid, 1) for eid in ids], [40, 50, 35])
         # Recreate the real pre-upgrade constraint and legacy 1-point records.
         with self.store.db:
             self.store.db.execute('DROP TABLE raid_points')
@@ -217,9 +217,9 @@ class RaidStoreTests(unittest.TestCase):
                 self.store.db.execute('INSERT INTO raid_points VALUES(?,?,?,1,?)', (eid, '123', '1', NOW.isoformat()))
         self.store.close()
         self.store = RaidStore(self.path)
-        self.assertEqual([self.store.event_credit(123, eid, 1) for eid in ids], [2, 3, 1])
+        self.assertEqual([self.store.event_credit(123, eid, 1) for eid in ids], [40, 50, 35])
         summary = self.store.point_summary(123, 1)
-        self.assertEqual((summary['points'], summary['events']), (6, 3))
+        self.assertEqual((summary['points'], summary['events']), (125, 3))
 
     def test_wipe_keeps_history_but_zero_survives_restart_old_clicks_and_replay(self):
         self.signup()
@@ -247,7 +247,7 @@ class RaidStoreTests(unittest.TestCase):
         self.assertEqual(self.store.event(123, self.event_id)['status'], 'open')
         self.signup(2)  # A new attendance after the reset can earn points normally.
         self.moderate(2, 'accepted')
-        self.assertEqual(self.store.point_summary(123, 2)['points'], 2)
+        self.assertEqual(self.store.point_summary(123, 2)['points'], 40)
 
 
 class RaidUITests(unittest.IsolatedAsyncioTestCase):
@@ -380,7 +380,7 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
             clock.now.return_value = NOW
             clock.fromisoformat.side_effect = datetime.fromisoformat
             await view.children[0].callback(self.interaction(uid=10))
-        self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 1)
+        self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 35)
         self.assertTrue(all(b.disabled for b in view.children))
         with self.assertRaises(ValueError):
             await self.service.handle_public(self.interaction(), self.event_id, 'join')
@@ -390,7 +390,7 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         i = self.interaction(uid=10)
         await self.service.moderate(i, self.event_id, 20, 'accepted')
         self.assertEqual(self.service.store.participants(self.event_id)[0]['status'], 'accepted')
-        self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 1)
+        self.assertEqual(self.service.store.leaderboard(123)[0]['points'], 35)
         panel = LeaderView(self.service, self.event_id, 10)
         actions = [b.label for b in panel.children if isinstance(b, discord.ui.Button)]
         self.assertIn('Hadir', actions)
@@ -434,7 +434,7 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         for _ in range(2):
             await command.callback(admin, target, 5, 'Material @everyone')
         row = self.service.store.leaderboard(123)[0]
-        self.assertEqual((row['points'], row['events'], row['contributions']), (10, 3, 1))
+        self.assertEqual((row['points'], row['events'], row['contributions']), (125, 3, 1))
         admin.response.defer.assert_awaited_with(ephemeral=False)
         self.assertFalse(admin.followup.send.call_args.kwargs['ephemeral'])
         self.assertTrue(admin.followup.send.call_args.args[0].startswith('<@&789>\n'))
@@ -444,7 +444,7 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual([role.id for role in mentions.roles], [789])
         reader = self.interaction()
         await self.bot.tree.get_command('leaderboard').callback(reader)
-        self.assertIn('1. **<@30>** — **10 poin** · 3 event, 1 contribution', reader.response.send_message.call_args.args[0])
+        self.assertIn('1. **<@30>** — **125 poin** · 3 event, 1 contribution', reader.response.send_message.call_args.args[0])
 
     async def test_addpoint_rejects_bot_wrong_guild_and_blank_detail(self):
         admin = self.interaction()

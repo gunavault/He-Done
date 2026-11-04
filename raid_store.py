@@ -7,7 +7,7 @@ from schedule import WIB, parse_time, SUPPORTED_INDICES
 
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
-EVENT_POINTS = {'trex': 2, 'savage': 3, 'rift': 1}
+EVENT_POINTS = {'trex': 40, 'savage': 50, 'rift': 35}
 STATUSES = {
     'pending': 'Menunggu diterima', 'accepted': 'Hadir',
     'absent': 'Tidak Hadir',
@@ -106,13 +106,13 @@ class RaidStore:
                 AND p.status='accepted' AND e.status IN ('open','completed'))''')
             self.db.execute('''INSERT OR IGNORE INTO raid_points
                 SELECT e.id,e.guild_id,p.user_id,
-                    CASE e.kind WHEN 'trex' THEN 2 WHEN 'savage' THEN 3 ELSE 1 END,p.updated_at
+                    CASE e.kind WHEN 'trex' THEN 40 WHEN 'savage' THEN 50 ELSE 35 END,p.updated_at
                 FROM raid_participants p JOIN raid_events e ON e.id=p.event_id
                 WHERE p.status='accepted' AND e.status IN ('open','completed')
                 AND NOT EXISTS (SELECT 1 FROM raid_wiped_awards w
                     WHERE w.event_id=p.event_id AND w.user_id=p.user_id)''')
             self.db.execute('''UPDATE raid_points SET points=(SELECT
-                CASE kind WHEN 'trex' THEN 2 WHEN 'savage' THEN 3 ELSE 1 END
+                CASE kind WHEN 'trex' THEN 40 WHEN 'savage' THEN 50 ELSE 35 END
                 FROM raid_events WHERE id=raid_points.event_id)''')
 
     def event(self, guild_id, event_id):
