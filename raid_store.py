@@ -71,6 +71,13 @@ class RaidStore:
                 detail TEXT NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
             );
             CREATE INDEX IF NOT EXISTS raid_contributions_guild ON raid_contributions(guild_id,user_id);
+            CREATE TABLE IF NOT EXISTS raid_deductions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                interaction_id TEXT NOT NULL UNIQUE,guild_id TEXT NOT NULL,user_id TEXT NOT NULL,
+                points INTEGER NOT NULL CHECK(points>0),detail TEXT NOT NULL,
+                actor_id TEXT NOT NULL,created_at TEXT NOT NULL,voided INTEGER NOT NULL DEFAULT 0
+            );
+            CREATE INDEX IF NOT EXISTS raid_deductions_guild ON raid_deductions(guild_id,user_id);
             CREATE TABLE IF NOT EXISTS raid_wiped_awards (
                 event_id INTEGER NOT NULL REFERENCES raid_events(id),
                 user_id TEXT NOT NULL, PRIMARY KEY(event_id,user_id)
@@ -95,6 +102,8 @@ class RaidStore:
                 self.db.execute('CREATE INDEX raid_points_guild ON raid_points(guild_id,user_id)')
             if 'voided' not in {row['name'] for row in self.db.execute('PRAGMA table_info(raid_contributions)')}:
                 self.db.execute('ALTER TABLE raid_contributions ADD COLUMN voided INTEGER NOT NULL DEFAULT 0')
+            if 'deductions' not in {row['name'] for row in self.db.execute('PRAGMA table_info(raid_point_resets)')}:
+                self.db.execute('ALTER TABLE raid_point_resets ADD COLUMN deductions INTEGER NOT NULL DEFAULT 0')
         # Upgrade older six-status raids and reconcile one point per accepted member.
         # Idempotent: restarting never adds a second point for an event/user pair.
         with self.db:
@@ -250,6 +259,26 @@ class RaidStore:
                 VALUES(?,?,?,?,?,?,?)''', (*values, datetime.now(WIB).isoformat()))
             return cur.lastrowid
 
+    def remove_points(self, guild_id, user_id, points, detail, actor_id, interaction_id):
+        if type(points) is not int or not 1 <= points <= 1000000:
+            raise ValueError('Point harus bilangan bulat 1–1000000.')
+        detail = detail.strip()
+        if not 1 <= len(detail) <= 500:
+            raise ValueError('Alasan pengurangan harus 1–500 karakter.')
+        values = (str(interaction_id), str(guild_id), str(user_id), points, detail, str(actor_id))
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            old = self.db.execute('SELECT * FROM raid_deductions WHERE interaction_id=?',
+                                  (str(interaction_id),)).fetchone()
+            if old:
+                if tuple(old[k] for k in ('interaction_id', 'guild_id', 'user_id', 'points', 'detail', 'actor_id')) != values:
+                    raise ValueError('Permintaan pengurangan sudah dipakai untuk data berbeda.')
+                return old['id']
+            cur = self.db.execute('''INSERT INTO raid_deductions
+                (interaction_id,guild_id,user_id,points,detail,actor_id,created_at)
+                VALUES(?,?,?,?,?,?,?)''', (*values, datetime.now(WIB).isoformat()))
+            return cur.lastrowid
+
     def leaderboard(self, guild_id, page=0):
         return self.db.execute('''SELECT user_id,SUM(points) AS points,
                 SUM(events) AS events,SUM(contributions) AS contributions
@@ -257,21 +286,27 @@ class RaidStore:
                 SELECT user_id,points,1 AS events,0 AS contributions FROM raid_points WHERE guild_id=?
                 UNION ALL
                 SELECT user_id,points,0 AS events,1 AS contributions FROM raid_contributions WHERE guild_id=? AND voided=0
+                UNION ALL
+                SELECT user_id,-points,0 AS events,0 AS contributions FROM raid_deductions WHERE guild_id=? AND voided=0
             ) GROUP BY user_id ORDER BY points DESC,user_id LIMIT 10 OFFSET ?''',
-            (str(guild_id), str(guild_id), page * 10)).fetchall()
+            (str(guild_id), str(guild_id), str(guild_id), page * 10)).fetchall()
 
     def point_summary(self, guild_id, user_id):
         return self.db.execute('''SELECT COALESCE(SUM(points),0) AS points,
                 COALESCE(SUM(events),0) AS events,COALESCE(SUM(contributions),0) AS contributions,
                 COALESCE(SUM(event_points),0) AS event_points,
-                COALESCE(SUM(contribution_points),0) AS contribution_points
+                COALESCE(SUM(contribution_points),0) AS contribution_points,
+                COALESCE(SUM(deduction_points),0) AS deduction_points
             FROM (
-                SELECT points,1 AS events,0 AS contributions,points AS event_points,0 AS contribution_points
+                SELECT points,1 AS events,0 AS contributions,points AS event_points,0 AS contribution_points,0 AS deduction_points
                 FROM raid_points WHERE guild_id=? AND user_id=?
                 UNION ALL
-                SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points
+                SELECT points,0 AS events,1 AS contributions,0 AS event_points,points AS contribution_points,0 AS deduction_points
                 FROM raid_contributions WHERE guild_id=? AND user_id=? AND voided=0
-            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
+                UNION ALL
+                SELECT -points,0 AS events,0 AS contributions,0 AS event_points,0 AS contribution_points,points AS deduction_points
+                FROM raid_deductions WHERE guild_id=? AND user_id=? AND voided=0
+            )''', (str(guild_id), str(user_id), str(guild_id), str(user_id), str(guild_id), str(user_id))).fetchone()
 
     def wipe_points(self, guild_id, actor_id, interaction_id):
         with self.db:
@@ -284,14 +319,16 @@ class RaidStore:
                 return old
             event_count = self.db.execute('SELECT COUNT(*) FROM raid_points WHERE guild_id=?', (str(guild_id),)).fetchone()[0]
             contributions = self.db.execute('SELECT COUNT(*) FROM raid_contributions WHERE guild_id=? AND voided=0', (str(guild_id),)).fetchone()[0]
+            deductions = self.db.execute('SELECT COUNT(*) FROM raid_deductions WHERE guild_id=? AND voided=0', (str(guild_id),)).fetchone()[0]
             self.db.execute('''INSERT OR IGNORE INTO raid_wiped_awards
                 SELECT event_id,user_id FROM raid_points WHERE guild_id=?''', (str(guild_id),))
             self.db.execute('DELETE FROM raid_points WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE raid_contributions SET voided=1 WHERE guild_id=?', (str(guild_id),))
+            self.db.execute('UPDATE raid_deductions SET voided=1 WHERE guild_id=?', (str(guild_id),))
             cur = self.db.execute('''INSERT INTO raid_point_resets
-                (interaction_id,guild_id,actor_id,created_at,event_awards,contributions)
-                VALUES(?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
-                                       datetime.now(WIB).isoformat(), event_count, contributions))
+                (interaction_id,guild_id,actor_id,created_at,event_awards,contributions,deductions)
+                VALUES(?,?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),
+                                       datetime.now(WIB).isoformat(), event_count, contributions, deductions))
             return self.db.execute('SELECT * FROM raid_point_resets WHERE id=?', (cur.lastrowid,)).fetchone()
 
     def event_credit(self, guild_id, event_id, user_id):

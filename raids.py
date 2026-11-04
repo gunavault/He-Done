@@ -376,6 +376,34 @@ class RaidService:
                 allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
                     roles=[discord.Object(id=self.bot.role_id)], replied_user=False))
 
+        @self.bot.tree.command(name='remove', description='Administrator server mengurangi poin satu anggota dengan alasan')
+        @app_commands.guild_only()
+        @app_commands.default_permissions(administrator=True)
+        @app_commands.check(check_server)
+        @app_commands.describe(user='Anggota yang poinnya dikurangi', point='Jumlah poin yang dikurangi (positif)',
+                               detail='Alasan pengurangan, maksimal 500 karakter')
+        async def remove(interaction: discord.Interaction, user: discord.Member,
+                         point: app_commands.Range[int, 1, 1000000], detail: str):
+            self.require_admin(interaction)
+            if not isinstance(user, discord.Member) or user.guild.id != self.guild_id or user.bot:
+                raise ValueError('Pilih satu anggota manusia pada server ini.')
+            if not 1 <= len(detail.strip()) <= 500:
+                raise ValueError('Alasan pengurangan harus 1–500 karakter.')
+            await interaction.response.defer(ephemeral=False)
+            async with self.lock:
+                receipt = self.store.remove_points(self.guild_id, user.id, point, detail,
+                                                   interaction.user.id, interaction.id)
+                total = self.store.point_summary(self.guild_id, user.id)['points']
+            log.info('Deduction #%s: guild_id=%s user_id=%s points=%s actor_id=%s',
+                     receipt, self.guild_id, user.id, point, interaction.user.id)
+            safe_detail = discord.utils.escape_markdown(discord.utils.escape_mentions(detail.strip()))
+            await interaction.followup.send(
+                f'<@&{self.bot.role_id}>\n'
+                f'➖ Pengurangan #{receipt}: <@{user.id}> dikurangi **{point} poin**.\n'
+                f'Alasan: {safe_detail}\nTotal sekarang: **{total} poin**.', ephemeral=False,
+                allowed_mentions=discord.AllowedMentions(everyone=False, users=False,
+                    roles=[discord.Object(id=self.bot.role_id)], replied_user=False))
+
         @self.bot.tree.command(name='point', description='Lihat poin sendiri atau poin satu anggota server')
         @app_commands.guild_only()
         @app_commands.check(check_server)
@@ -390,7 +418,8 @@ class RaidService:
                 f'🏅 **Poin <@{member.id}>**\n'
                 f"Total: **{summary['points']} poin**\n"
                 f"Event: **{summary['events']} event** · {summary['event_points']} poin\n"
-                f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin",
+                f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin\n"
+                f"Pengurangan: **{summary['deduction_points']} poin**",
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
         @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')

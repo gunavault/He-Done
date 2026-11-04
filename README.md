@@ -314,6 +314,16 @@ Anggota yang hanya punya poin kontribusi tetap masuk leaderboard dengan 0 event.
 
 Setelah update, restart agar perintah baru tersinkronisasi. Data timer, raid, dan poin sebelumnya tetap dipertahankan.
 
+### Mengurangi poin anggota
+
+```text
+/remove user:@anggota point:10 detail:Alasan pengurangan
+```
+
+Hanya pemilik izin **Administrator** server yang bisa menjalankan, sama seperti `/addpoint`. Isi jumlah positif 1–1000000 dan alasan wajib 1–500 karakter. Bot mengurangi total poin anggota sebanyak jumlah tersebut; saldo dapat menjadi negatif. Hasil diumumkan publik pada channel perintah dengan mention `ROLE_ID`, sama seperti pengumuman kontribusi.
+
+Pengurangan disimpan terpisah di `raid_deductions`, termasuk penerima, jumlah, alasan, administrator pemberi, waktu, dan ID interaksi. Jumlah event dan contribution tetap. `/point` menampilkan rincian Pengurangan dan total bersih; leaderboard juga memakai total bersih. Pengiriman ulang interaksi yang sama tidak mengurangi dua kali. Alasan tidak memicu ping tambahan. Wipe dari console mereset pengurangan sekaligus poin event/kontribusi sehingga total benar-benar kembali nol; riwayat tetap disimpan untuk audit.
+
 ### Cek poin per anggota
 
 ```text

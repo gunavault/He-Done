@@ -184,17 +184,17 @@ class RaidStoreTests(unittest.TestCase):
 
     def test_personal_point_summary_includes_zero_and_isolates_user_and_server(self):
         empty = dict(self.store.point_summary(123, 1))
-        self.assertEqual(empty, dict(points=0, events=0, contributions=0, event_points=0, contribution_points=0))
+        self.assertEqual(empty, dict(points=0, events=0, contributions=0, event_points=0, contribution_points=0, deduction_points=0))
         self.signup()
         self.moderate(1, 'accepted')
         self.store.add_contribution(123, 1, 5, 'Material', 99, 'summary-1')
         self.store.add_contribution(123, 2, 20, 'Other user', 99, 'summary-2')
         self.store.add_contribution(124, 1, 100, 'Other server', 99, 'summary-3')
         self.assertEqual(dict(self.store.point_summary(123, 1)),
-                         dict(points=45, events=1, contributions=1, event_points=40, contribution_points=5))
+                         dict(points=45, events=1, contributions=1, event_points=40, contribution_points=5, deduction_points=0))
         self.store.respond(123, self.event_id, 1, 'Player', False)
         self.assertEqual(dict(self.store.point_summary(123, 1)),
-                         dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5))
+                         dict(points=5, events=0, contributions=1, event_points=0, contribution_points=5, deduction_points=0))
 
     def test_three_event_weights_and_upgrade_old_one_point_constraint(self):
         ids = [self.event_id]
@@ -220,6 +220,42 @@ class RaidStoreTests(unittest.TestCase):
         self.assertEqual([self.store.event_credit(123, eid, 1) for eid in ids], [40, 50, 35])
         summary = self.store.point_summary(123, 1)
         self.assertEqual((summary['points'], summary['events']), (125, 3))
+
+    def test_deductions_reduce_total_preserve_counts_and_survive_restart_and_wipe(self):
+        self.signup()
+        self.moderate(1, 'accepted')
+        self.store.add_contribution(123, 1, 5, 'Material', 99, 'remove-add')
+        receipt = self.store.remove_points(123, 1, 10, 'Koreksi', 99, 'remove-1')
+        self.assertEqual(self.store.remove_points(123, 1, 10, 'Koreksi', 99, 'remove-1'), receipt)
+        self.store.remove_points(124, 1, 100, 'Other server', 99, 'remove-other')
+        self.store.close()
+        self.store = RaidStore(self.path)
+        summary = self.store.point_summary(123, 1)
+        self.assertEqual((summary['points'], summary['event_points'], summary['contribution_points'], summary['deduction_points']), (35, 40, 5, 10))
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (35, 1, 1))
+        detail = self.store.db.execute('SELECT * FROM raid_deductions WHERE id=?', (receipt,)).fetchone()
+        self.assertEqual((detail['detail'], detail['actor_id']), ('Koreksi', '99'))
+        reset = self.store.wipe_points(123, 'console', 'remove-reset')
+        self.assertEqual(reset['deductions'], 1)
+        self.assertEqual(self.store.leaderboard(123), [])
+        self.store.remove_points(123, 1, 10, 'Koreksi', 99, 'remove-1')
+        self.assertEqual(self.store.point_summary(123, 1)['points'], 0)
+        self.store.close()
+        self.store = RaidStore(self.path)
+        self.assertEqual(self.store.point_summary(123, 1)['points'], 0)
+        self.assertEqual(self.store.point_summary(124, 1)['points'], -100)
+
+    def test_remove_validation_collision_and_negative_balance(self):
+        for points, reason in ((0, 'a'), (-1, 'a'), (1.5, 'a'), (True, 'a'), (1000001, 'a'), (1, ' '), (1, 'x' * 501)):
+            with self.assertRaises(ValueError):
+                self.store.remove_points(123, 1, points, reason, 99, 'remove-invalid')
+        self.store.remove_points(123, 1, 10, 'Penalty', 99, 'negative')
+        self.assertEqual(self.store.point_summary(123, 1)['points'], -10)
+        row = self.store.leaderboard(123)[0]
+        self.assertEqual((row['points'], row['events'], row['contributions']), (-10, 0, 0))
+        with self.assertRaises(ValueError):
+            self.store.remove_points(123, 2, 20, 'Different', 99, 'negative')
 
     def test_wipe_keeps_history_but_zero_survives_restart_old_clicks_and_replay(self):
         self.signup()
@@ -491,3 +527,38 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         reader.guild_id = 124
         with self.assertRaises(app_commands.CheckFailure):
             await command.callback(reader)
+
+    async def test_remove_admin_only_public_role_notification_and_point_display(self):
+        command = self.bot.tree.get_command('remove')
+        self.assertTrue(command.default_permissions.administrator)
+        target = self.interaction(uid=30).user
+        target.guild = SimpleNamespace(id=123)
+        for reader in (self.interaction(), self.interaction(role=True), self.interaction(uid=10)):
+            with self.assertRaises(app_commands.CheckFailure):
+                await command.callback(reader, target, 10, 'Koreksi')
+        admin = self.interaction()
+        admin.id = 54321
+        admin.user.guild_permissions = SimpleNamespace(administrator=True)
+        self.service.store.add_contribution(123, 30, 50, 'Material', 99, 'remove-ui-add')
+        for _ in range(2):
+            await command.callback(admin, target, 10, 'Koreksi @everyone')
+        self.assertEqual(self.service.store.point_summary(123, 30)['points'], 40)
+        self.assertFalse(admin.followup.send.call_args.kwargs['ephemeral'])
+        self.assertIn('<@&789>', admin.followup.send.call_args.args[0])
+        mentions = admin.followup.send.call_args.kwargs['allowed_mentions']
+        self.assertEqual([role.id for role in mentions.roles], [789])
+        self.assertFalse(mentions.everyone)
+        self.assertFalse(mentions.users)
+        target.guild.id = 124
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 10, 'Koreksi')
+        target.guild.id = 123
+        target.bot = True
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 10, 'Koreksi')
+        target.bot = False
+        with self.assertRaises(ValueError):
+            await command.callback(admin, target, 10, '   ')
+        reader = self.interaction()
+        await self.bot.tree.get_command('point').callback(reader, target)
+        self.assertIn('Pengurangan: **10 poin**', reader.response.send_message.call_args.args[0])
