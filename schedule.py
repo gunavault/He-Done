@@ -5,10 +5,12 @@ from zoneinfo import ZoneInfo
 import re
 import math
 import sqlite3
+from urllib.parse import quote
 
 WIB = ZoneInfo('Asia/Jakarta')
 SUPPORTED_INDICES = tuple(f'{main}.{sub}' for main in range(1, 9) for sub in range(1, 6))
 VOICE_INDICES = ('3.1', '3.2', '4.1', '4.3')
+WORLD_BOSS_PLACES = ('Volcano', 'Snowfield', 'Tundra', 'Swamp', 'Desert', 'Tropical')
 DEFAULT_SLOTS = (('3.1', time(11, 20)), ('3.2', time(12, 47)),
                  ('3.1', time(18, 0)), ('3.2', time(19, 27)))
 DEFAULT_OFFSETS = (30, 15, 5, 0)
@@ -18,6 +20,14 @@ GRACE_SECONDS = 60
 def display_place(value):
     value = value.replace('\\', '\\\\').replace('@', '@\u200b')
     return re.sub(r'([`*_~|<>])', r'\\\1', value)
+
+
+def normalize_place(value):
+    value = ' '.join(value.split())
+    for place in WORLD_BOSS_PLACES:
+        if value.casefold() == place.casefold():
+            return place
+    raise ValueError('Tempat harus salah satu dari: ' + ', '.join(WORLD_BOSS_PLACES) + '.')
 
 
 def parse_time(value):
@@ -57,7 +67,8 @@ class Reminder:
 
     @property
     def key(self):
-        return f'{self.index}|{self.start.isoformat()}|{self.minutes_before}'
+        key = f'{self.index}|{self.start.isoformat()}|{self.minutes_before}'
+        return f'{quote(self.place.casefold(), safe="")}|{key}' if self.place else key
 
     def is_due(self, now):
         # Missed countdowns must not arrive hours late after downtime.
@@ -95,9 +106,7 @@ class Timer:
 def calculate_timer(index, waktu, tanggal=None, now=None, place=''):
     if index not in SUPPORTED_INDICES:
         raise ValueError('Index harus 1.1–8.5: angka utama 1–8 dan sub-index .1–.5.')
-    place = ' '.join(place.split())
-    if len(place) > 100:
-        raise ValueError('Tempat maksimal 100 karakter.')
+    place = normalize_place(place) if place.strip() else ''
     now = (now or datetime.now(WIB)).astimezone(WIB)
     at = parse_time(waktu)
     day = now.date()
@@ -170,25 +179,39 @@ def due_reminders(now, slots=DEFAULT_SLOTS, offsets=DEFAULT_OFFSETS, timers=()):
 class Store:
     def __init__(self, path):
         self.db = sqlite3.connect(path)
-        # Previous 'jobs' table is left intact. Daily mode doesn't consume manual jobs.
+        # Legacy job/receipt tables are retained; island-aware timers use their own table.
         self.db.execute('''CREATE TABLE IF NOT EXISTS deliveries (
             event_key TEXT PRIMARY KEY, sent_at TEXT NOT NULL)''')
         self.db.execute('''CREATE TABLE IF NOT EXISTS timer_overrides (
             guild_id TEXT NOT NULL, idx TEXT NOT NULL, observed TEXT NOT NULL,
             start TEXT NOT NULL, end TEXT NOT NULL, PRIMARY KEY (guild_id, idx))''')
-        if 'place' not in {row[1] for row in self.db.execute('PRAGMA table_info(timer_overrides)')}:
-            self.db.execute("ALTER TABLE timer_overrides ADD COLUMN place TEXT NOT NULL DEFAULT ''")
         self.db.commit()
+        self.db.executescript('''
+            CREATE TABLE IF NOT EXISTS worldboss_timers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,guild_id TEXT NOT NULL,
+                place TEXT NOT NULL,idx TEXT NOT NULL,observed TEXT NOT NULL,
+                start TEXT NOT NULL,end TEXT NOT NULL,UNIQUE(guild_id,place,idx)
+            );
+            CREATE TABLE IF NOT EXISTS worldboss_migrations (name TEXT PRIMARY KEY);
+        ''')
+        with self.db:
+            self.db.execute('BEGIN IMMEDIATE')
+            if not self.db.execute("SELECT 1 FROM worldboss_migrations WHERE name='island-index-v1'").fetchone():
+                # User requested a fresh start for old index-only world boss timers.
+                # Clear only the obsolete timer table, never point/raid/redeem data.
+                self.db.execute('DELETE FROM timer_overrides')
+                self.db.execute("INSERT INTO worldboss_migrations VALUES('island-index-v1')")
 
     def set_timer(self, guild_id, timer):
+        place = normalize_place(timer.place) if timer.place else ''
         with self.db:
-            self.db.execute('''INSERT OR REPLACE INTO timer_overrides
-                            (guild_id,idx,observed,start,end,place) VALUES (?, ?, ?, ?, ?, ?)''',
-                            (str(guild_id), timer.index, timer.observed.isoformat(),
-                             timer.start.isoformat(), timer.end.isoformat(), timer.place))
+            self.db.execute('''INSERT INTO worldboss_timers(guild_id,place,idx,observed,start,end)
+                VALUES(?,?,?,?,?,?) ON CONFLICT(guild_id,place,idx) DO UPDATE SET
+                observed=excluded.observed,start=excluded.start,end=excluded.end''',
+                (str(guild_id), place, timer.index, timer.observed.isoformat(), timer.start.isoformat(), timer.end.isoformat()))
 
     def timers(self, guild_id):
-        rows = self.db.execute('SELECT idx, observed, start, end, place FROM timer_overrides WHERE guild_id=?',
+        rows = self.db.execute('SELECT idx, observed, start, end, place FROM worldboss_timers WHERE guild_id=? ORDER BY place,idx',
                                (str(guild_id),)).fetchall()
         return tuple(Timer(row[0], *(datetime.fromisoformat(value) for value in row[1:4]), row[4]) for row in rows)
 

@@ -5,18 +5,18 @@ Bot mengirim pengingat world boss dengan tag role berdasarkan **register satu ka
 ## Register world boss
 
 ```text
-/worldbossregister index:3.1 tempat:Gurun waktu:11:20
-/worldbossregister index:8.5 tempat:Savana waktu:12:00
+/worldbossregister index:3.1 tempat:Volcano waktu:11:20
+/worldbossregister index:8.5 tempat:Snowfield waktu:12:00
 /worldbossregister
 /jadwal
 /jadwal halaman:2
 ```
 
-Opsi index tersedia **1.1–8.5**, total 40 kombinasi. Ketik angka utama seperti `8.` untuk melihat 8.1–8.5. Saat mengupdate, isi `index`, `tempat`, dan `waktu` bersama. `tempat` maksimal 100 karakter. `waktu` adalah jam kemunculan aktual terakhir, bukan jam notifikasi.
+Opsi index tersedia **1.1–8.5**, total 40 kombinasi. Ketik angka utama seperti `8.` untuk melihat 8.1–8.5. Saat mengupdate, isi `index`, `tempat`, dan `waktu` bersama. `tempat` dipilih dari Volcano, Snowfield, Tundra, Swamp, Desert, atau Tropical. `waktu` adalah jam kemunculan aktual terakhir, bukan jam notifikasi.
 
 Formula tetap **+6 jam 40 menit sampai +7 jam**. Contoh register 11:20 menghasilkan satu jendela **18:00–18:20 WIB pada tanggal yang dihitung**, dengan default pengingat H-30 17:30, H-15 17:45, dan H-0 18:00. Offset lain mengikuti REMINDER_MINUTES. Setelah 18:20 berlalu, jadwal menjadi tidak aktif dan tidak dibuat lagi untuk besok. Register lagi dengan waktu kemunculan baru untuk jadwal berikutnya. Tidak ada siklus 6 jam 40 menit otomatis.
 
-Update index yang sama mengganti register sebelumnya; index lain tetap terpisah. Timer tersimpan setelah restart dengan tanggal/jam aslinya. Register lama yang sudah kedaluwarsa tetap tersimpan sebagai data, tetapi tidak mengirim pengingat lagi. `INDEX_31_TIMES` dan `INDEX_32_TIMES` dari env lama diabaikan, sehingga tidak ada jadwal tambahan tanpa register.
+Update pasangan **tempat + index** yang sama mengganti register sebelumnya. Volcano 3.1 dan Snowfield 3.1 memiliki timer terpisah; update Volcano 3.1 tidak mengubah Snowfield 3.1. Timer tersimpan setelah restart dengan tanggal/jam aslinya. Register lama yang sudah kedaluwarsa tetap tersimpan sebagai data, tetapi tidak mengirim pengingat lagi. `INDEX_31_TIMES` dan `INDEX_32_TIMES` dari env lama diabaikan, sehingga tidak ada jadwal tambahan tanpa register.
 
 Tanggal default hari ini WIB. Untuk waktu kemunculan kemarin, isi `tanggal:YYYY-MM-DD`. Jika formula melintasi tengah malam, jadwal bisa jatuh besok dan tetap hanya sekali. Waktu kemunculan yang masih di masa depan ditolak. Jika jendela hasil perhitungan sudah seluruhnya lewat, bot memberitahu bahwa jendela sudah lewat, tanpa menggesernya ke besok. Pengingat yang terlewat mengikuti tenggang 60 detik, bukan dikirim sekaligus.
 
@@ -168,7 +168,7 @@ docker compose up -d --build
 
 Jika sebelumnya menjalankan Python langsung, hentikan proses lama, lalu jalankan `python bot.py` kembali dari environment yang sama. Jangan menimpa `.env`; atur `REMINDER_MINUTES` seperti contoh di atas. Jadwal hanya aktif setelah register; variabel INDEX_31_TIMES/INDEX_32_TIMES tidak digunakan.
 
-Versi ini memakai timer sekali per register. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan; interval perhitungan tetap 400–420 menit. Database lama otomatis mendapat tabel timer baru tanpa menghapus data sebelumnya.
+Versi ini memakai timer sekali per register. Variabel lama `SPAWN_MIN_MINUTES` / `SPAWN_MAX_MINUTES` tidak digunakan; interval perhitungan tetap 400–420 menit. Versi tempat + index membuat tabel timer baru dan mereset timer format lama satu kali; data poin, raid, dan redeem tidak dihapus.
 
 ### Wispbyte
 
@@ -177,7 +177,7 @@ Pada halaman Startup gunakan `PY_FILE=bot.py`, `REQUIREMENTS_FILE=requirements.t
 ## Perintah Discord
 
 - `/worldbossregister`: tampilkan spawn terdekat atau jendela aktif, tanggal WIB, dan sisa waktu. Respons publik tanpa tag role. Jika tidak ada jadwal aktif, meminta register baru tanpa mengulang jadwal lama. Sisa waktu dihitung saat dipanggil, bukan diperbarui terus-menerus.
-- `/worldbossregister index:3.1 tempat:Gurun waktu:11:20`: perbarui timer satu index. `index`, `tempat`, dan `waktu` wajib diisi bersama; `tanggal` opsional. Hanya anggota dengan role sesuai `ROLE_ID` yang dapat mengedit.
+- `/worldbossregister index:3.1 tempat:Volcano waktu:11:20`: perbarui timer satu pasangan tempat + index. `index`, `tempat`, dan `waktu` wajib diisi bersama; `tanggal` opsional. Hanya anggota dengan role sesuai `ROLE_ID` yang dapat mengedit.
 - `/jadwal`: lihat jadwal berikutnya dan seluruh jam pengingat, memakai timer terbaru. Respons privat tanpa tag role.
 - `/tesvoice`: tes suara di voice channel yang dikonfigurasi, kemudian keluar. Memerlukan **Manage Server**.
 - `/tes`: langsung kirim pesan uji publik dan tag role ke channel tujuan. Memerlukan **Manage Server**.
@@ -390,8 +390,8 @@ Tes otomatis memeriksa katalog awal, perubahan katalog setelah restart, saldo/kl
 ## World boss register: index, tempat, waktu
 
 ```text
-/worldbossregister index:1.1 tempat:Gurun waktu:11:20
-/worldbossregister index:8.5 tempat:Savana waktu:12:00
+/worldbossregister index:1.1 tempat:Volcano waktu:11:20
+/worldbossregister index:8.5 tempat:Snowfield waktu:12:00
 /worldbossraid jam:18:00 tempat:Gurun index:8.5
 /jadwal halaman:2
 ```
@@ -400,11 +400,26 @@ Format update timer adalah **index → tempat → waktu**, dengan tanggal opsion
 
 Index menerima 1.1–1.5, 2.1–2.5, sampai 8.1–8.5. Karena ada 40 kombinasi, menu memakai autocomplete maksimal 25 saran per pencarian: ketik angka utama seperti `8.` untuk melihat semua sub-index yang cocok. `/worldbossraid` memakai index yang sama. Memilih index baru tidak mengaktifkan jadwal sampai waktu terakhir muncul diisi.
 
-Tempat wajib saat mengupdate timer, maksimal 100 karakter, dan disimpan per index. Tempat tampil pada konfirmasi, jadwal, spawn terdekat, dan pesan pengingat. Data timer lama tetap terbaca dengan tempat kosong; perbarui timer untuk menambahkan tempat. `/jadwal` dibagi menjadi halaman jika daftar panjang agar semua index bisa dibaca.
+Tempat wajib dipilih dari enam pulau dan disimpan bersama index sebagai satu pasangan unik per server. Tempat tampil pada konfirmasi, jadwal, spawn terdekat, dan pesan pengingat. Timer format lama direset satu kali saat pembaruan pertama ke versi tempat + index; isi register baru untuk mulai menjadwalkan kembali. `/jadwal` dibagi menjadi halaman jika daftar panjang agar semua index bisa dibaca.
 
 Notifikasi teks berlaku untuk semua index. Rekaman H-30/H-15 tetap hanya untuk 3.1, 3.2, 4.1, dan 4.3; index lain tidak memakai rekaman bernama index lain. H-0 semua index memakai audio `spawn.mp3` yang sama tanpa penutup. Command `/tesvoice` tetap memilih empat index rekaman lama.
 
-Perbarui seluruh kode termasuk **`bot.py`, `schedule.py`, `raids.py`, dan `voice_alerts.py`**, lalu restart. Migrasi menambahkan kolom tempat pada database yang sama tanpa menghapus timer, poin, atau riwayat redeem. Pertahankan `DB_PATH` dan folder `data/`.
+Perbarui seluruh kode termasuk **`bot.py`, `schedule.py`, `raids.py`, dan `voice_alerts.py`**, lalu restart. Migrasi membuat tabel worldboss_timers dengan ID unik dan pembatas unik server + tempat + index. Sesuai permintaan, timer lama di timer_overrides dikosongkan satu kali; poin, raid, dan riwayat redeem tidak dihapus. Register format baru tetap tersimpan pada restart berikutnya. Pertahankan `DB_PATH` dan folder `data/`.
+
+## Timer per pulau dan index
+
+```text
+/worldbossregister index:3.1 tempat:Volcano waktu:11:20
+/worldbossregister index:3.1 tempat:Snowfield waktu:12:00
+```
+
+Kedua register tersimpan bersama. Identitas jadwal adalah **server + tempat + index**, dengan ID database unik. Update pasangan yang sama mempertahankan ID-nya dan mengganti waktunya. Pilihan tempat tetap **Volcano, Snowfield, Tundra, Swamp, Desert, Tropical**; kapitalisasi dinormalisasi agar `volcano` dan `Volcano` tidak membuat dua timer. Setiap pulau mendukung 40 index (1.1–8.5).
+
+Jadwal, notifikasi teks, dan pencatatan pengiriman voice membedakan pulau, termasuk bila dua pulau memiliki index dan waktu spawn persis sama. `/jadwal` menampilkan setiap pasangan aktif dan membagi hasil menjadi halaman. Formula tetap +6 jam 40 menit sampai +7 jam, sekali per register.
+
+**Reset timer lama:** pada startup pertama setelah update ini, bot mengosongkan tabel timer format lama (`timer_overrides`). Ini sesuai permintaan untuk mulai dari register baru. Tidak perlu menjalankan wipe point atau menghapus database. Poin, riwayat kontribusi, pengurangan, redeem, dan data raid tetap ada. Reset migrasi hanya sekali; timer format baru tidak dihapus saat restart berikutnya. Setelah update, register kembali pasangan pulau + index yang ingin dipantau.
+
+Perbarui `bot.py` dan `schedule.py` bersama, lalu restart untuk sinkronisasi pilihan tempat dan reset timer lama. Pertahankan file database yang sekarang.
 
 ## Referensi
 

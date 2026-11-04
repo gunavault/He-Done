@@ -41,6 +41,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.deliver_due(event.trigger)
             await self.bot.deliver_due(event.trigger + timedelta(seconds=5))
         self.assertEqual(self.bot.send_notice.await_count, 4)
+
         await self.bot.close()
         self.bot = TrexBot()
         self.bot.send_notice = AsyncMock()
@@ -53,6 +54,32 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.bot.deliver_due(event.trigger)
         self.assertEqual(self.bot.send_notice.await_count, 4)
 
+
+    async def test_same_index_different_islands_deliver_independently_and_update_only_one(self):
+        await self.update_timer(tempat='Volcano')
+        await self.update_timer(tempat='Snowfield')
+        parameter = next(p for p in self.bot.tree.get_command('worldbossregister').parameters if p.name == 'tempat')
+        self.assertEqual([c.value for c in parameter.choices], ['Volcano', 'Snowfield', 'Tundra', 'Swamp', 'Desert', 'Tropical'])
+        self.bot.voice.channel_id = 888
+        self.bot.voice.announce = AsyncMock(return_value=True)
+        now = datetime(2026, 10, 30, 17, 30, tzinfo=WIB)
+        await self.bot.deliver_due(now)
+        await self.flush_voice()
+        self.assertEqual(self.bot.send_notice.await_count, 2)
+        self.assertEqual(self.bot.voice.announce.await_count, 2)
+        messages = [call.args[0] for call in self.bot.send_notice.call_args_list]
+        self.assertTrue(any('Volcano' in m for m in messages))
+        self.assertTrue(any('Snowfield' in m for m in messages))
+        self.bot.send_notice.reset_mock()
+        await self.update_timer(tempat='Volcano', waktu='11:30')
+        await self.bot.deliver_due(datetime(2026, 10, 30, 17, 45, tzinfo=WIB))
+        self.assertIn('Snowfield', self.bot.send_notice.call_args.args[0])
+        await self.bot.close()
+        self.bot = TrexBot()
+        self.bot.send_notice = AsyncMock()
+        self.assertEqual(len(self.bot.store.timers(123)), 2)
+        await self.bot.deliver_due(datetime(2026, 10, 30, 17, 45, tzinfo=WIB))
+        self.bot.send_notice.assert_not_awaited()
     async def morning_timer(self):
         await self.update_timer(waktu='04:40', now=datetime(2026, 10, 30, 5, 0, tzinfo=WIB))
 
@@ -100,7 +127,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs['allowed_mentions'].to_dict(), {'parse': []})
         self.bot.send_notice.assert_not_awaited()
 
-    async def update_timer(self, index='3.1', waktu='11:20', now=None):
+    async def update_timer(self, index='3.1', waktu='11:20', now=None, tempat='Volcano'):
         interaction = AsyncMock()
         interaction.guild_id = self.bot.guild_id
         interaction.permissions = SimpleNamespace(manage_guild=False)
@@ -108,7 +135,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.user.roles = [SimpleNamespace(id=self.bot.role_id)]
         with patch('bot.datetime') as clock:
             clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            await self.bot.tree.get_command('worldbossregister').callback(interaction, index=index, tempat='Gurun', waktu=waktu)
+            await self.bot.tree.get_command('worldbossregister').callback(interaction, index=index, tempat=tempat, waktu=waktu)
         return interaction
 
     async def test_update_replaces_reminders_and_survives_restart(self):
@@ -151,7 +178,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaises(ValueError):
             await callback(interaction, index='3.1')
         with self.assertRaises(app_commands.CheckFailure):
-            await callback(interaction, index='3.1', tempat='Gurun', waktu='11:20')
+            await callback(interaction, index='3.1', tempat='Volcano', waktu='11:20')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
 
     async def test_timer_edit_requires_exact_env_role_even_for_admins(self):
@@ -163,7 +190,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         for roles in ([], [SimpleNamespace(id=111, name='Hunter')]):
             interaction.user.roles = roles
             with self.assertRaisesRegex(app_commands.CheckFailure, 'ROLE_ID'):
-                await callback(interaction, index='3.1', tempat='Gurun', waktu='11:20')
+                await callback(interaction, index='3.1', tempat='Volcano', waktu='11:20')
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), ())
         interaction.followup.send.assert_not_awaited()
 
@@ -238,16 +265,14 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
-        self.assertIn('4.1, 4.2, 4.3', interaction.response.send_message.call_args.args[0])
+        self.assertIn('Belum ada jadwal aktif', interaction.response.send_message.call_args.args[0])
         await self.update_timer(index='4.3', waktu='08:20')
         await self.update_timer(index='4.1', waktu='08:30')
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
         message = interaction.response.send_message.call_args.args[0]
-        self.assertIn('Index tanpa jadwal aktif', message)
-        self.assertNotIn('4.1,', message.split('Index tanpa jadwal aktif: ')[1])
-        self.assertNotIn('4.3,', message.split('Index tanpa jadwal aktif: ')[1])
+        self.assertIn('Pasangan tempat + index aktif: 2', message)
         self.assertEqual(message.count('**Index'), 2)
         for index in ('4.1', '4.3'):
             self.assertIn(f'**Index {index}', message)
@@ -269,7 +294,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             await self.update_timer(index=index)
         timers = self.bot.store.timers(self.bot.guild_id)
         self.assertEqual(len(timers), 40)
-        self.assertTrue(all(t.place == 'Gurun' for t in timers))
+        self.assertTrue(all(t.place == 'Volcano' for t in timers))
         interaction = AsyncMock()
         for page in range(1, 20):
             with patch('bot.datetime') as clock:
@@ -281,7 +306,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             message = interaction.response.send_message.call_args.args[0]
             self.assertLessEqual(len(message), 2000)
             if page == 1:
-                self.assertIn('Tempat: Gurun', message)
+                self.assertIn('Tempat: Volcano', message)
         self.assertGreater(interaction.response.send_message.await_count, 1)
 
     async def test_voice_receipt_prevents_duplicates_independently_of_text(self):
@@ -340,7 +365,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_voice_job_is_invalidated_by_timer_update(self):
         await self.morning_timer()
-        event = daily_reminders(date(2026, 10, 30))[0]
+        event = effective_reminders(date(2026, 10, 30), slots=(), timers=self.bot.store.timers(123))[0]
         with patch('bot.datetime') as clock:
             clock.now.return_value = event.trigger
             self.assertTrue(self.bot.voice_is_current(event))

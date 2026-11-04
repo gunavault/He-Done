@@ -126,7 +126,7 @@ class ScheduleTests(unittest.TestCase):
 
     def test_one_off_window_active_across_midnight_then_expires(self):
         observed = datetime(2026, 10, 30, 18, 0, tzinfo=WIB)
-        timer = calculate_timer('8.5', '17:10', now=observed, place='Gurun')
+        timer = calculate_timer('8.5', '17:10', now=observed, place='Volcano')
         now = datetime(2026, 10, 31, 0, 5, tzinfo=WIB)
         event = next_spawn(now, slots=(), timers=(timer,))
         self.assertEqual(event.start, datetime(2026, 10, 30, 23, 50, tzinfo=WIB))
@@ -150,15 +150,15 @@ class ScheduleTests(unittest.TestCase):
         import sqlite3
         now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
         for index in SUPPORTED_INDICES:
-            timer = calculate_timer(index, '11:20', now=now, place='  Gurun   Timur  ')
-            self.assertEqual(timer.place, 'Gurun Timur')
+            timer = calculate_timer(index, '11:20', now=now, place='  snowfield  ')
+            self.assertEqual(timer.place, 'Snowfield')
             events = effective_reminders(now.date(), slots=(), timers=(timer,))
-            self.assertEqual(events[0].place, 'Gurun Timur')
-            self.assertIn('Tempat: Gurun Timur', events[0].message())
-            self.assertIn('Gurun Timur', next_spawn_message(now, slots=(), timers=(timer,)))
+            self.assertEqual(events[0].place, 'Snowfield')
+            self.assertIn('Tempat: Snowfield', events[0].message())
+            self.assertIn('Snowfield', next_spawn_message(now, slots=(), timers=(timer,)))
         for index in ('0.1', '9.1', '1.0', '8.6', '1', '1.01', '1.1.1'):
             with self.assertRaises(ValueError):
-                calculate_timer(index, '11:20', now=now, place='Gurun')
+                calculate_timer(index, '11:20', now=now, place='Volcano')
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'legacy.sqlite3'
             old_timer = calculate_timer('3.1', '11:20', now=now)
@@ -168,12 +168,12 @@ class ScheduleTests(unittest.TestCase):
                 db.execute('INSERT INTO timer_overrides VALUES(?,?,?,?,?)',
                            ('123', '3.1', old_timer.observed.isoformat(), old_timer.start.isoformat(), old_timer.end.isoformat()))
             store = Store(path)
-            self.assertEqual(store.timers(123), (old_timer,))
-            timer = calculate_timer('8.5', '11:20', now=now, place='Savana')
+            self.assertEqual(store.timers(123), ())
+            timer = calculate_timer('8.5', '11:20', now=now, place='Desert')
             store.set_timer(123, timer)
             store.close()
             store = Store(path)
-            self.assertEqual({t.index: t.place for t in store.timers(123)}, {'3.1': '', '8.5': 'Savana'})
+            self.assertEqual({t.index: t.place for t in store.timers(123)}, {'8.5': 'Desert'})
             store.close()
 
     def test_updated_window_remains_visible_until_end(self):
@@ -184,6 +184,76 @@ class ScheduleTests(unittest.TestCase):
         self.assertIn('Sedang dalam jendela spawn', next_spawn_message(now, timers=(timer,)))
         # At the end, the expired window is no longer the nearest.
         self.assertEqual(next_spawn(datetime(2026, 10, 30, 18, 20, tzinfo=WIB), timers=(timer,)).index, '3.2')
+
+    def test_island_index_identity_upsert_and_independent_delivery_keys(self):
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        volcano = calculate_timer('3.1', '11:20', now=now, place=' volcano ')
+        snow = calculate_timer('3.1', '11:20', now=now, place='Snowfield')
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'bot.sqlite3'
+            store = Store(path)
+            store.set_timer(123, volcano)
+            store.set_timer(123, snow)
+            before_id = store.db.execute("SELECT id FROM worldboss_timers WHERE place='Volcano'").fetchone()[0]
+            updated = calculate_timer('3.1', '11:30', now=now, place='VOLCANO')
+            store.set_timer(123, updated)
+            self.assertEqual(store.db.execute("SELECT id FROM worldboss_timers WHERE place='Volcano'").fetchone()[0], before_id)
+            timers = {t.place: t for t in store.timers(123)}
+            self.assertEqual(timers, {'Volcano': updated, 'Snowfield': snow})
+            store.set_timer(124, volcano)
+            self.assertEqual(len(store.timers(123)), 2)
+            self.assertEqual(len(store.timers(124)), 1)
+            events = effective_reminders(now.date(), slots=(), offsets=(30,), timers=(volcano, snow))
+            self.assertNotEqual(events[0].key, events[1].key)
+            store.mark_sent('123|' + events[0].key, now)
+            self.assertFalse(store.was_sent('123|' + events[1].key))
+            store.close()
+            store = Store(path)
+            self.assertEqual({t.place: t for t in store.timers(123)}, timers)
+            store.close()
+        for place in ('Savana', 'Gurun', 'wrong', 'Volcano|Snowfield'):
+            with self.assertRaises(ValueError):
+                calculate_timer('3.1', '11:20', now=now, place=place)
+
+    def test_legacy_timer_wipe_once_preserves_point_raid_redeem_and_new_timers(self):
+        import sqlite3
+        now = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
+        old = calculate_timer('3.1', '11:20', now=now, place='Volcano')
+        old_key = f'123|3.1|{old.start.isoformat()}|30'
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'legacy.sqlite3'
+            with sqlite3.connect(path) as db:
+                db.execute('''CREATE TABLE timer_overrides (guild_id TEXT,idx TEXT,observed TEXT,
+                    start TEXT,end TEXT,place TEXT,PRIMARY KEY(guild_id,idx))''')
+                db.execute('INSERT INTO timer_overrides VALUES(?,?,?,?,?,?)',
+                           ('123', '3.1', old.observed.isoformat(), old.start.isoformat(), old.end.isoformat(), 'volcano'))
+                db.execute('CREATE TABLE deliveries(event_key TEXT PRIMARY KEY,sent_at TEXT)')
+                for key in (old_key, 'voice|' + old_key):
+                    db.execute('INSERT INTO deliveries VALUES(?,?)', (key, now.isoformat()))
+            from raid_store import RaidStore
+            points = RaidStore(path)
+            points.add_contribution(123, 1, 500, 'Preserve', 99, 'preserve')
+            points.seed_catalog(123)
+            item = points.catalog_items(123)[0]
+            order = points.redeem_item(123, 1, item['id'], item['name'], item['price'], 'preserve-redeem')
+            raid_id = points.create(123, 456, 99, 'rift', now, 'Test raid')
+            store = Store(path)
+            self.assertEqual(store.timers(123), ())
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM timer_overrides').fetchone()[0], 0)
+            self.assertEqual(points.point_summary(123, 1)['points'], 300)
+            self.assertEqual(points.redeem_order(123, order['id'])['status'], 'pending')
+            self.assertEqual(points.event(123, raid_id)['place'], 'Test raid')
+            event = effective_reminders(now.date(), slots=(), offsets=(30,), timers=(old,))[0]
+            self.assertFalse(store.was_sent('123|' + event.key))
+            self.assertTrue(store.was_sent(old_key))
+            points.close()
+            changed = calculate_timer('3.1', '11:30', now=now, place='Volcano')
+            store.set_timer(123, changed)
+            store.close()
+            store = Store(path)
+            self.assertEqual(store.timers(123), (changed,))
+            self.assertEqual(store.db.execute('SELECT COUNT(*) FROM worldboss_timers').fetchone()[0], 1)
+            store.close()
 
     def test_receipt_persists_across_restart(self):
         with tempfile.TemporaryDirectory() as tmp:

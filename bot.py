@@ -9,7 +9,7 @@ from discord import app_commands
 from discord.ext import tasks
 from dotenv import load_dotenv
 
-from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES, VOICE_INDICES, Reminder, display_place
+from schedule import WIB, Store, daily_reminders, due_reminders, parse_times, parse_offsets, next_spawn_message, calculate_timer, effective_reminders, SUPPORTED_INDICES, VOICE_INDICES, WORLD_BOSS_PLACES, Reminder, display_place
 
 from voice_alerts import VoiceAnnouncer
 from raids import RaidService, index_autocomplete
@@ -72,7 +72,8 @@ class TrexBot(discord.Client):
         @app_commands.guild_only()
         @app_commands.check(check_server)
         @app_commands.autocomplete(index=index_autocomplete)
-        @app_commands.describe(index='Index 1.1–8.5; ketik angka utama untuk memilih', tempat='Lokasi world boss, maksimal 100 karakter', waktu='Waktu terakhir muncul, HH:MM WIB',
+        @app_commands.choices(tempat=[app_commands.Choice(name=place, value=place) for place in WORLD_BOSS_PLACES])
+        @app_commands.describe(index='Index 1.1–8.5; ketik angka utama untuk memilih', tempat='Pulau world boss; setiap pasangan pulau dan index punya timer sendiri', waktu='Waktu terakhir muncul, HH:MM WIB',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
         async def worldbossregister(interaction: discord.Interaction, index: str | None = None,
                        tempat: str | None = None, waktu: str | None = None, tanggal: str | None = None):
@@ -86,7 +87,7 @@ class TrexBot(discord.Client):
                     allowed_mentions=discord.AllowedMentions.none())
                 return
             if index is None or tempat is None or waktu is None:
-                raise ValueError('Untuk update, isi index, tempat, dan waktu: /worldbossregister index:3.1 tempat:Gurun waktu:11:20. Tanpa opsi untuk melihat jadwal.')
+                raise ValueError('Untuk update, isi index, tempat, dan waktu: /worldbossregister index:3.1 tempat:Volcano waktu:11:20. Tanpa opsi untuk melihat jadwal.')
             if not tempat.strip():
                 raise ValueError('Tempat wajib diisi.')
             self.require_timer_role(interaction)
@@ -106,7 +107,7 @@ class TrexBot(discord.Client):
                 label = f'H-{offset}' if offset else 'Jendela spawn dimulai'
                 status = ' (sudah lewat; dilewati)' if at + timedelta(seconds=60) <= now else ''
                 lines.append(f'{label}: {at:%d-%m %H:%M} WIB{status}')
-            lines.append('Jadwal lama index ini diganti. Berlaku sekali untuk register ini, tanpa pengulangan harian.')
+            lines.append('Hanya jadwal pasangan tempat + index ini yang diganti. Berlaku sekali, tanpa pengulangan harian.')
             if event.end <= now:
                 lines.append('Jendela ini sudah lewat. Register waktu kemunculan terbaru untuk menjadwalkan pengingat lagi.')
             await interaction.followup.send('\n'.join(lines), ephemeral=True,
@@ -132,10 +133,9 @@ class TrexBot(discord.Client):
                     label = f'H-{offset}' if offset else 'Spawn dimulai'
                     lines.append(f'{label}: {at:%d-%m %H:%M} WIB')
                 blocks.append('\n'.join(lines))
-            active_indices = {event.index for event in events}
-            unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
-            if unconfigured:
-                blocks.append('\nIndex tanpa jadwal aktif: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> tempat:<lokasi> waktu:<HH:MM>.')
+            if not events:
+                blocks.append('Belum ada jadwal aktif. Isi /worldbossregister index:<index> tempat:<pulau> waktu:<HH:MM>.')
+            blocks.append(f'\nPasangan tempat + index aktif: {len(events)}. Tempat: ' + ', '.join(WORLD_BOSS_PLACES) + '. Index 1.1–8.5 tersedia di setiap tempat.')
             pages, body = [], ''
             for block in blocks:
                 if body and len(body) + len(block) + 1 > 1750:
