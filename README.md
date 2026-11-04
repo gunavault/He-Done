@@ -426,3 +426,17 @@ Perbarui `bot.py` dan `schedule.py` bersama, lalu restart untuk sinkronisasi pil
 - https://discordpy.readthedocs.io/en/stable/ext/tasks/index.html
 - https://discordpy.readthedocs.io/en/stable/api.html#discord.AllowedMentions
 - https://discordpy.readthedocs.io/en/stable/interactions/api.html
+
+
+## Gaji poin mingguan (otomatis Sabtu WIB)
+
+Administrator server mengatur gaji tetap dengan `/gajianmingguan user:@anggota point:50 details:Leader raid`. `/gajian` menampilkan seluruh penerima aktif (opsi `halaman`), `/gajianstop user:@anggota` menghentikan pembayaran berikutnya, dan `/gajianriwayat` menampilkan pembayaran sebelumnya.
+
+Gaji dibayar otomatis setiap **Sabtu pukul 09:00 WIB** (diubah melalui `GAJIAN_JAM=HH:MM`). Mengatur gaji tidak membayar langsung. Pendaftaran/perubahan jumlah gaji mulai berlaku Sabtu terdekat yang belum lewat. Menjalankan pengaturan identik tidak menggeser tanggal. Pembayaran tercatat satu kali per orang per Sabtu, aman dari restart, dan masuk saldo poin raid/redeem yang sama. Jika bot offline, pembayaran Sabtu terbaru yang terlewat diproses ketika bot kembali aktif, asalkan pendaftaran masih aktif; periode lebih lama tidak dibayar otomatis. Bot harus tetap menyala dan hanya satu instance yang dianjurkan.
+
+`/point` dan `/leaderboard` menampilkan saldo termasuk gaji. Reset poin dari console juga menonaktifkan saldo gaji lama (riwayat tetap), tetapi **tidak menghapus daftar gaji aktif**. Pengumuman otomatis tanpa mention massal dan dapat diarahkan ke channel lain dengan `GAJIAN_CHANNEL_ID` (default `CHANNEL_ID`). Jangan hapus file SQLite saat update.
+
+```env
+GAJIAN_JAM=09:00
+GAJIAN_CHANNEL_ID=
+```
