@@ -54,6 +54,12 @@ class SalaryStoreMixin:
         ''')
 
     def salary_set(self, guild_id, user_id, points, detail, actor_id, *, now=None, hour=None):
+        """Create/update payroll; first-ever salary payment is credited immediately.
+
+        The registration and the credit are committed in one SQLite transaction.
+        A prior payment record (even one voided by wipe) prevents another bonus
+        when a command is replayed, salary is edited, or payroll is reactivated.
+        """
         if type(points) is not int or not 1 <= points <= 1000000:
             raise ValueError('Point gaji harus bilangan bulat 1–1000000.')
         if not isinstance(detail, str) or not 1 <= len(detail.strip()) <= 500:
@@ -66,19 +72,39 @@ class SalaryStoreMixin:
         values = (str(guild_id), str(user_id))
         with self.db:
             self.db.execute('BEGIN IMMEDIATE')
-            previous = self.db.execute('SELECT * FROM weekly_salaries WHERE guild_id=? AND user_id=?', values).fetchone()
-            if previous and previous['active'] and previous['points'] == points and previous['detail'] == detail:
-                return previous
-            effective = next_salary_day(now, hour).isoformat()
-            self.db.execute('''INSERT INTO weekly_salaries
-                (guild_id,user_id,points,detail,active,effective_payday,updated_by,created_at,updated_at)
-                VALUES(?,?,?,?,1,?,?,?,?)
-                ON CONFLICT(guild_id,user_id) DO UPDATE SET
-                    points=excluded.points,detail=excluded.detail,active=1,
-                    effective_payday=excluded.effective_payday,
-                    updated_by=excluded.updated_by,updated_at=excluded.updated_at''',
-                (*values, points, detail, effective, str(actor_id), now.isoformat(), now.isoformat()))
-            return self.db.execute('SELECT * FROM weekly_salaries WHERE guild_id=? AND user_id=?', values).fetchone()
+            previous = self.db.execute(
+                'SELECT * FROM weekly_salaries WHERE guild_id=? AND user_id=?', values
+            ).fetchone()
+            unchanged = (previous and previous['active'] and
+                         previous['points'] == points and previous['detail'] == detail)
+            if not unchanged:
+                effective = next_salary_day(now, hour).isoformat()
+                self.db.execute('''INSERT INTO weekly_salaries
+                    (guild_id,user_id,points,detail,active,effective_payday,updated_by,created_at,updated_at)
+                    VALUES(?,?,?,?,1,?,?,?,?)
+                    ON CONFLICT(guild_id,user_id) DO UPDATE SET
+                        points=excluded.points,detail=excluded.detail,active=1,
+                        effective_payday=excluded.effective_payday,
+                        updated_by=excluded.updated_by,updated_at=excluded.updated_at''',
+                    (*values, points, detail, effective, str(actor_id),
+                     now.isoformat(), now.isoformat()))
+            row = self.db.execute(
+                'SELECT * FROM weekly_salaries WHERE guild_id=? AND user_id=?', values
+            ).fetchone()
+            paid_before = self.db.execute(
+                'SELECT 1 FROM weekly_salary_payments WHERE guild_id=? AND user_id=? LIMIT 1',
+                values
+            ).fetchone()
+            first_payment = False
+            if paid_before is None:
+                # Date-based key means a first-time registration on Saturday is
+                # credited now, but NOT again at the scheduled Saturday tick.
+                inserted = self.db.execute('''INSERT OR IGNORE INTO weekly_salary_payments
+                    (guild_id,user_id,payday,points,detail,paid_at)
+                    VALUES(?,?,?,?,?,?)''',
+                    (*values, now.date().isoformat(), points, detail, now.isoformat()))
+                first_payment = inserted.rowcount == 1
+            return {**dict(row), 'first_payment': first_payment}
 
     def salary_stop(self, guild_id, user_id, actor_id, *, now=None):
         now = (now or datetime.now(WIB)).astimezone(WIB)
