@@ -60,7 +60,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_trex_response_displays_nearest_without_ping(self):
         interaction = AsyncMock()
-        command = self.bot.tree.get_command('trex')
+        command = self.bot.tree.get_command('worldbossregister')
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await command.callback(interaction)
@@ -80,7 +80,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.user.roles = [SimpleNamespace(id=self.bot.role_id)]
         with patch('bot.datetime') as clock:
             clock.now.return_value = now or datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            await self.bot.tree.get_command('trex').callback(interaction, index=index, waktu=waktu)
+            await self.bot.tree.get_command('worldbossregister').callback(interaction, index=index, waktu=waktu)
         return interaction
 
     async def test_update_replaces_reminders_and_survives_restart(self):
@@ -113,13 +113,13 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction = AsyncMock()
         with patch('bot.datetime') as clock:
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
-            await self.bot.tree.get_command('trex').callback(interaction)
+            await self.bot.tree.get_command('worldbossregister').callback(interaction)
         self.assertIn('18:10–18:30 WIB', interaction.response.send_message.call_args.args[0])
 
     async def test_partial_and_unauthorized_updates_do_not_mutate(self):
         interaction = AsyncMock()
         interaction.permissions = SimpleNamespace(manage_guild=False)
-        callback = self.bot.tree.get_command('trex').callback
+        callback = self.bot.tree.get_command('worldbossregister').callback
         with self.assertRaises(ValueError):
             await callback(interaction, index='3.1')
         with self.assertRaises(app_commands.CheckFailure):
@@ -131,7 +131,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.guild_id = self.bot.guild_id
         interaction.user = MagicMock(spec=discord.Member)
         interaction.permissions = SimpleNamespace(manage_guild=True, administrator=True)
-        callback = self.bot.tree.get_command('trex').callback
+        callback = self.bot.tree.get_command('worldbossregister').callback
         for roles in ([], [SimpleNamespace(id=111, name='Hunter')]):
             interaction.user.roles = roles
             with self.assertRaisesRegex(app_commands.CheckFailure, 'ROLE_ID'):
@@ -168,7 +168,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         interaction.guild_id = self.bot.guild_id
         interaction.user = MagicMock(spec=discord.Member)
         interaction.user.roles = []
-        for name in ('trex', 'jadwal'):
+        for name in ('worldbossregister', 'jadwal'):
             command = self.bot.tree.get_command(name)
             for check in command.checks:
                 self.assertTrue(await check(interaction))
@@ -184,7 +184,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.bot.store.timers(self.bot.guild_id), previous)
 
     async def test_new_indices_choices_updates_delivery_and_restart(self):
-        command = self.bot.tree.get_command('trex')
+        command = self.bot.tree.get_command('worldbossregister')
         choices = next(p for p in command.parameters if p.name == 'index').choices
         self.assertEqual([choice.value for choice in choices], ['3.1', '3.2', '4.1', '4.3'])
         await self.update_timer(index='4.3', waktu='08:20')
@@ -402,7 +402,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_commands_and_role_mention_scope(self):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()},
-                         {'trex', 'jadwal', 'tes', 'tesvoice', 'trexraid', 'rift', 'savage', 'raid', 'leaderboard', 'addpoint', 'point', 'remove',
+                         {'worldbossregister', 'jadwal', 'tes', 'tesvoice', 'worldbossraid', 'rift', 'savage', 'raid', 'leaderboard', 'addpoint', 'point', 'remove',
                           'katalog', 'katalogadd', 'katalogremove', 'redeem', 'redeemhistory', 'redeemqueue', 'redeemstatus'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()

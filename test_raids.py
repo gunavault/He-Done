@@ -353,10 +353,10 @@ class RaidUITests(unittest.IsolatedAsyncioTestCase):
         channel.send = AsyncMock(return_value=SimpleNamespace(id=1000, jump_url='https://discord.com/channels/123/555/1000'))
         self.service.channel = AsyncMock(return_value=channel)
         old = self.bot.store.timers(123)
-        for name in ('rift', 'savage', 'trexraid'):
+        for name in ('rift', 'savage', 'worldbossraid'):
             command = self.bot.tree.get_command(name)
             values = {'jam': '20:00', 'tempat': 'Gurun'}
-            if name == 'trexraid':
+            if name == 'worldbossraid':
                 values['index'] = '3.1'
             with patch('raids.raid_time', return_value=NOW):
                 await command.callback(self.interaction(role=True), **values)

@@ -71,13 +71,13 @@ class TrexBot(discord.Client):
                 raise app_commands.CheckFailure('Perintah hanya untuk server yang diatur di .env.')
             return True
 
-        @self.tree.command(name='trex', description='Lihat spawn terdekat atau perbarui timer index dengan index dan waktu')
+        @self.tree.command(name='worldbossregister', description='Lihat spawn terdekat atau perbarui timer index dengan index dan waktu')
         @app_commands.guild_only()
         @app_commands.check(check_server)
         @app_commands.choices(index=[app_commands.Choice(name=x, value=x) for x in SUPPORTED_INDICES])
         @app_commands.describe(index='Index yang timernya diperbarui', waktu='Waktu terakhir muncul, HH:MM WIB',
                                tanggal='Opsional YYYY-MM-DD; default hari ini WIB')
-        async def trex(interaction: discord.Interaction, index: str | None = None,
+        async def worldbossregister(interaction: discord.Interaction, index: str | None = None,
                        waktu: str | None = None, tanggal: str | None = None):
             if index is None and waktu is None and tanggal is None:
                 await interaction.response.send_message(
@@ -85,7 +85,7 @@ class TrexBot(discord.Client):
                     allowed_mentions=discord.AllowedMentions.none())
                 return
             if index is None or waktu is None:
-                raise ValueError('Untuk update, isi keduanya: /trex index:3.1 waktu:11:20. Tanpa opsi untuk melihat jadwal.')
+                raise ValueError('Untuk update, isi keduanya: /worldbossregister index:3.1 waktu:11:20. Tanpa opsi untuk melihat jadwal.')
             self.require_timer_role(interaction)
             await interaction.response.defer(ephemeral=True)
             # The same lock is held by the sender: no old timer can be queued after this update.
@@ -132,7 +132,7 @@ class TrexBot(discord.Client):
             active_indices = {index for index, _ in self.slots} | overridden
             unconfigured = [index for index in SUPPORTED_INDICES if index not in active_indices]
             if unconfigured:
-                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /trex index:<index> waktu:<HH:MM>.')
+                lines.append('\nIndex belum diisi: ' + ', '.join(unconfigured) + '. Isi lewat /worldbossregister index:<index> waktu:<HH:MM>.')
             await interaction.response.send_message('\n'.join(lines), ephemeral=True)
 
         @self.tree.command(name='tes', description='Kirim pesan uji ke channel tujuan, termasuk tag role')
@@ -186,7 +186,7 @@ class TrexBot(discord.Client):
         self.raids.restore_views()
         self.redeem.restore_views()
         self.console.start()
-        # Sync optional /trex parameters and remove obsolete commands from this guild.
+        # Sync optional /worldbossregister parameters and remove obsolete commands from this guild.
         self.tree.copy_global_to(guild=self.target_guild)
         await self.tree.sync(guild=self.target_guild)
         self.notify.start()
