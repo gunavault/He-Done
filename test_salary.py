@@ -37,22 +37,25 @@ class SalaryStoreTests(unittest.TestCase):
     def test_payment_once_restart_and_point_totals(self):
         row = self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.wed)
         self.assertEqual(row['effective_payday'], '2026-11-07')
+        self.assertTrue(row['first_payment'])
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 100)
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [('21', 50)])
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [])
-        self.assertEqual(self.store.point_summary(123, 21)['points'], 50)
-        self.assertEqual(self.store.salary_summary(123, 21)['points'], 50)
-        self.assertEqual(self.store.leaderboard(123)[0]['points'], 50)
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 100)
+        self.assertEqual(self.store.salary_summary(123, 21)['points'], 100)
+        self.assertEqual(self.store.leaderboard(123)[0]['points'], 100)
         self.store.close()
         self.store = RaidStore(self.path)
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [])
         self.assertEqual(self.store.point_summary(123, 21)['points'], 50)
         self.assertEqual(self.store.salary_payweek(123, (self.sat + timedelta(days=7)).date(),
                          now=self.sat + timedelta(days=7)), [('21', 50)])
-        self.assertEqual(self.store.point_summary(123, 21)['points'], 100)
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 150)
 
     def test_stop_change_idempotency_and_isolation(self):
         self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.wed)
-        self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.sat)
+        same = self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.sat)
+        self.assertFalse(same['first_payment'])
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [('21', 50)])
         self.store.salary_set(123, 21, 75, 'Promoted', 99, now=self.sat + timedelta(hours=1))
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat + timedelta(hours=1)), [])
@@ -62,11 +65,11 @@ class SalaryStoreTests(unittest.TestCase):
         self.assertFalse(self.store.salary_stop(123, 21, 99))
         self.assertEqual(self.store.salary_payweek(123, (self.sat + timedelta(days=14)).date(),
                          now=self.sat + timedelta(days=14)), [])
-        self.assertEqual(self.store.point_summary(123, 21)['points'], 125)
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 175)
         self.store.salary_set(124, 21, 100, 'Another guild', 99, now=self.wed)
         self.assertEqual(self.store.salary_payweek(124, self.sat.date(), now=self.sat), [('21', 100)])
         self.assertEqual(self.store.point_summary(123, 21)['points'], 125)
-        self.assertEqual(self.store.point_summary(124, 21)['points'], 100)
+        self.assertEqual(self.store.point_summary(124, 21)['points'], 200)
 
     def test_wipe_voids_history_not_future_payday(self):
         self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.wed)
@@ -78,6 +81,25 @@ class SalaryStoreTests(unittest.TestCase):
         self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [])
         self.assertEqual(self.store.salary_payweek(123, (self.sat + timedelta(days=7)).date(),
                          now=self.sat + timedelta(days=7)), [('21', 50)])
+
+    def test_first_payment_no_duplicate_after_reactivation_and_saturday(self):
+        initial = self.store.salary_set(123, 21, 50, 'Leader', 99, now=self.wed)
+        self.assertTrue(initial['first_payment'])
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 50)
+        self.store.salary_stop(123, 21, 99, now=self.wed)
+        again = self.store.salary_set(123, 21, 80, 'Return', 99, now=self.wed)
+        self.assertFalse(again['first_payment'])
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 50)
+        self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [('21', 80)])
+        self.assertEqual(self.store.point_summary(123, 21)['points'], 130)
+
+        other = self.store.salary_set(123, 22, 25, 'Saturday hire', 99,
+                                      now=clock((2026, 11, 7), 8))
+        self.assertTrue(other['first_payment'])
+        self.assertEqual(self.store.salary_payweek(123, self.sat.date(), now=self.sat), [])
+        self.assertEqual(self.store.point_summary(123, 22)['points'], 25)
+        self.assertEqual(self.store.salary_payweek(123, (self.sat + timedelta(days=7)).date(),
+                         now=self.sat + timedelta(days=7)), [('21', 80), ('22', 25)])
 
     def test_validation(self):
         for points, detail in [(0, 'ok'), (-1, 'ok'), (True, 'ok'), (1000001, 'ok'), (1, ' '), (1, 'x' * 501)]:
