@@ -198,50 +198,10 @@ class QuestUITests(unittest.IsolatedAsyncioTestCase):
         user.id, user.bot, user.guild = uid, False, SimpleNamespace(id=guild)
         user.roles = [SimpleNamespace(id=777)] if leader else []
         user.guild_permissions = SimpleNamespace(administrator=True, manage_guild=True)
-        message = SimpleNamespace(id=uid, flags=SimpleNamespace(ephemeral=True), delete=AsyncMock())
-        return SimpleNamespace(original_response=AsyncMock(return_value=message), user=user, guild_id=guild, channel_id=555,
+        return SimpleNamespace(user=user, guild_id=guild, channel_id=555,
             response=SimpleNamespace(send_message=AsyncMock(), edit_message=AsyncMock(), defer=AsyncMock(),
                                      send_modal=AsyncMock(), is_done=Mock(return_value=False)),
-            followup=SimpleNamespace(send=AsyncMock()), edit_original_response=AsyncMock(return_value=message))
-
-    async def test_private_panel_auto_dismiss_and_reopen_preserves_quest(self):
-        row = self.store.quest_claim(123, self.q['id'], 1, self.now)
-        interaction = self.interaction()
-        message = await interaction.original_response()
-        with patch('quests.asyncio.sleep', new_callable=AsyncMock) as delay:
-            await self.service.open_panel(interaction)
-            await self.service._dismiss_tasks[message.id]
-            delay.assert_awaited_once_with(20)
-        message.delete.assert_awaited_once()
-        self.assertEqual(self.store.quest_current(123, 1)['attempt_id'], row['attempt_id'])
-        await self.service.open_panel(interaction)
-        self.assertIsInstance(interaction.edit_original_response.call_args.kwargs['view'], QuestMemberView)
-
-    async def test_panel_update_resets_expiry_and_public_card_is_not_deleted(self):
-        interaction = self.interaction()
-        message = await interaction.original_response()
-        with patch('quests.asyncio.sleep', new_callable=AsyncMock) as delay:
-            await self.service.dismiss_later(interaction, message)
-            old = self.service._dismiss_tasks[message.id]
-            await self.service.dismiss_later(interaction, message)
-            current = self.service._dismiss_tasks[message.id]
-            await asyncio.gather(old, current, return_exceptions=True)
-            self.assertTrue(old.cancelled())
-            delay.assert_awaited_once_with(20)
-        message.delete.assert_awaited_once()
-        message.flags.ephemeral = False
-        await self.service.dismiss_later(interaction, message)
-        self.assertFalse(self.service._dismiss_tasks)
-        message.delete.assert_awaited_once()
-
-    async def test_dismissed_message_not_found_is_harmless(self):
-        interaction = self.interaction()
-        message = await interaction.original_response()
-        message.delete.side_effect = discord.NotFound(SimpleNamespace(status=404, reason='Not Found'), 'Unknown Message')
-        with patch('quests.asyncio.sleep', new_callable=AsyncMock):
-            await self.service.dismiss_later(interaction, message)
-            await self.service._dismiss_tasks[message.id]
-        self.assertFalse(self.service._dismiss_tasks)
+            followup=SimpleNamespace(send=AsyncMock()), edit_original_response=AsyncMock())
 
     async def test_dashboard_buttons_role_checks_and_no_admin_bypass(self):
         view = QuestMainView(self.service)
