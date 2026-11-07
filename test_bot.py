@@ -272,7 +272,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
             clock.now.return_value = datetime(2026, 10, 30, 13, 0, tzinfo=WIB)
             await self.bot.tree.get_command('jadwal').callback(interaction)
         message = interaction.response.send_message.call_args.args[0]
-        self.assertIn('Pasangan tempat + index aktif: 2', message)
+        self.assertIn('Tempat: Volcano', message)
         self.assertEqual(message.count('**Index'), 2)
         for index in ('4.1', '4.3'):
             self.assertIn(f'**Index {index}', message)
@@ -491,7 +491,8 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
     async def test_commands_and_role_mention_scope(self):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()},
                          {'worldbossregister', 'jadwal', 'tes', 'tesvoice', 'worldbossraid', 'rift', 'savage', 'raid', 'leaderboard', 'addpoint', 'point', 'remove',
-                          'katalog', 'katalogadd', 'katalogremove', 'redeem', 'redeemhistory', 'redeemqueue', 'redeemstatus'})
+                          'katalog', 'katalogadd', 'katalogremove', 'redeem', 'redeemhistory', 'redeemqueue', 'redeemstatus',
+                          'gajianmingguan', 'gajian', 'gajianstop', 'gajianriwayat', 'guildquest'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()
         role = type('FakeRole', (), {'id': 789, 'mention': '<@&789>'})()

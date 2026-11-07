@@ -16,6 +16,7 @@ from raids import RaidService, index_autocomplete
 from console_commands import ConsoleCommands
 from redeem import RedeemService
 from salary import SalaryService
+from quests import QuestService
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -53,6 +54,7 @@ class TrexBot(discord.Client):
         self.raids = RaidService(self, path)
         self.redeem = RedeemService(self)
         self.salary = SalaryService(self)
+        self.quests = QuestService(self)
         self.console = ConsoleCommands(self.raids)
 
     def require_timer_role(self, interaction):
@@ -197,6 +199,7 @@ class TrexBot(discord.Client):
     async def setup_hook(self):
         self.raids.restore_views()
         self.redeem.restore_views()
+        self.quests.restore_views()
         self.console.start()
         # Sync optional /worldbossregister parameters and remove obsolete commands from this guild.
         self.tree.copy_global_to(guild=self.target_guild)
@@ -219,6 +222,7 @@ class TrexBot(discord.Client):
             log.info('Tujuan siap: guild_id=%s channel_id=%s role_id=%s',
                      channel.guild.id, channel.id, role.id)
         await self.raids.refresh_open_cards()
+        await self.quests.startup()
 
     async def destination(self):
         guild = self.get_guild(self.guild_id)
@@ -314,6 +318,7 @@ class TrexBot(discord.Client):
         if self.is_ready():
             await self.deliver_due()
             await self.salary.tick()
+            await self.quests.tick()
 
     @notify.before_loop
     async def before_notify(self):

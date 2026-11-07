@@ -421,6 +421,74 @@ Jadwal, notifikasi teks, dan pencatatan pengiriman voice membedakan pulau, terma
 
 Perbarui `bot.py` dan `schedule.py` bersama, lalu restart untuk sinkronisasi pilihan tempat dan reset timer lama. Pertahankan file database yang sekarang.
 
+## Guild Quest
+
+Guild quest memakai satu card utama pada channel khusus. Card memuat **Quest Baru**, **Sedang Dikerjakan**, **Menunggu Persetujuan**, dan tiga penyelesaian terbaru. Setiap perubahan status memperbarui pesan yang sama, bukan mengirim card baru. Bila daftar panjang, card menampilkan ringkasan; panel privat menyediakan daftar lengkap berhalaman.
+
+### Pengaturan
+
+1. Buat channel teks `#guild-quest` dan salin ID-nya.
+2. Tambahkan env pada `.env` atau Startup Wispbyte yang aktif:
+
+```env
+GUILD_QUEST_CHANNEL_ID=ISI_ID_CHANNEL_GUILD_QUEST
+UNION_LEADER_ROLE_ID=ISI_ID_ROLE_UNION_LEADER
+```
+
+Channel kosong berarti fitur nonaktif. Role Union Leader kosong mengikuti `RAID_LEADER_ROLE_ID` (yang dapat mengikuti `ROLE_ID`). Semua pemegang role ini boleh membuat, mengedit quest tersedia, menarik quest tersedia, dan memeriksa submission. Izin Administrator saja tidak menggantikan role tersebut. Role @everyone ditolak. Leader dipercaya memeriksa hasil, termasuk bila dirinya sendiri ikut quest.
+
+3. Beri bot izin **View Channel, Send Messages, Embed Links** pada channel itu. Beri anggota akses melihat channel dan memakai komponen bot.
+4. Update seluruh kode termasuk **`quests.py` dan `quest_store.py`**, lalu restart. Tidak ada dependency baru. Pertahankan `.env`, `DB_PATH`, dan folder `data/`. Dockerfile sudah menyertakan modul baru.
+5. Setelah terkoneksi, bot otomatis membuat/memulihkan card utama. Leader juga bisa menjalankan `/guildquest` untuk membuat atau menyegarkan card jika diperlukan.
+
+Jika card terhapus, bot membuat penggantinya dan menyimpan ID baru. Kegagalan memperbarui pesan tidak membatalkan perubahan database: bot mencatat log dan mencoba kembali. Jangan menghapus database untuk memperbarui card.
+
+### Tombol utama dan panel member
+
+- **Accept Quest** membuka panel privat. Bila belum punya quest, pilih quest pada dropdown, periksa detail, lalu tekan **Accept Quest Terpilih**. Bila sudah punya quest, tombol yang sama membuka kembali quest itu, lengkap dengan detail, poin, batas waktu, **Submit Selesai**, dan **Abort Quest**.
+- **Abort Quest** membuka konfirmasi pembatalan quest milik sendiri. Setelah dikonfirmasi, quest kembali tersedia, tanpa pemberian poin. Submission yang masih menunggu leader juga dapat dibatalkan pemiliknya.
+- **Union Leader Panel** hanya untuk role Union Leader dan menyediakan pembuatan serta pengelolaan quest.
+
+**Dismiss/timeout panel bukan Abort.** Status dan batas waktu tersimpan di database. Klik Accept Quest pada card utama untuk membuka panel lagi, termasuk setelah bot restart. Batas waktu tetap berjalan saat panel ditutup atau bot offline.
+
+Satu quest diambil oleh satu anggota dan satu anggota maksimal memegang satu quest (termasuk submission yang menunggu persetujuan). Batas waktu dimulai saat Accept, bukan saat posting. Klik Accept berulang tidak memperpanjang batas waktu. Pengambilan baru setelah Abort/kedaluwarsa mendapat durasi baru. Panel dari pengambilan lama tidak dapat membatalkan/men-submit pengambilan baru.
+
+### Posting dan pemeriksaan oleh leader
+
+Pada Union Leader Panel, klik **Post Quest** untuk mengisi:
+
+| Isian | Ketentuan |
+|---|---|
+| Judul | 1–100 karakter |
+| Detail | 1–1500 karakter |
+| Poin | Bilangan bulat 1–1000000 |
+| Durasi | Bilangan bulat 1–720 jam |
+
+Leader memilih quest untuk melihat detail, pengambil, deadline, dan bukti. **Edit Quest** dan **Tarik Quest** hanya berlaku saat quest tersedia; penarikan memerlukan konfirmasi. Poin/durasi tidak dapat diubah setelah quest diambil. Form lama ditolak jika quest sudah berubah sejak form dibuka.
+
+Member menekan **Submit Selesai** dari panel questnya. Form menerima catatan atau link bukti opsional, maksimal 1000 karakter. Submission harus sebelum deadline; tepat saat deadline sudah dianggap kedaluwarsa. Submission yang tepat waktu pindah ke Menunggu Persetujuan, tanpa memberi poin dahulu, dan tidak kedaluwarsa saat menunggu leader.
+
+Leader memilih submission di Union Leader Panel lalu:
+
+- **Setujui Selesai:** quest selesai; poin masuk ke anggota dan jumlah quest selesai bertambah satu. Penekanan ulang tidak menggandakan poin.
+- **Minta Revisi:** isi alasan wajib. Quest kembali Dikerjakan dengan deadline semula. Bila deadline sudah lewat ketika diminta revisi, quest kembali tersedia tanpa poin.
+
+Jika member tidak submit sampai batas waktu, bot mengembalikan quest ke daftar tersedia dalam pemeriksaan berkala sekitar 15 detik (atau saat panel dibuka). Saat startup, bot memeriksa quest yang kedaluwarsa selama offline. Riwayat pengambilan, Abort, kedaluwarsa, submission, dan review tetap tersimpan.
+
+### Card, poin, dan penyimpanan
+
+Update card tidak menandai role/member berulang kali. Timestamp Discord menampilkan sisa waktu secara otomatis. Panel/konfirmasi privat bisa habis masa aktifnya; buka kembali lewat tiga tombol utama untuk data terbaru.
+
+Poin quest masuk ke saldo yang sama dengan event/kontribusi/gaji sehingga dapat dipakai redeem. Quest tidak dihitung sebagai event atau contribution. `/point` menambahkan rincian **Quest selesai** dan poin quest. `/leaderboard` menambahkan jumlah quest:
+
+> 1. **@Guna** — **500 poin** · 3 event, 2 contribution, 4 quest
+
+Jumlah quest hanya menghitung penyelesaian yang disetujui dan belum direset. Belanja redeem mengurangi saldo, tetapi tidak mengurangi hitungan quest selesai. Wipe poin dari console juga menonaktifkan hadiah quest untuk periode tersebut; riwayat quest tetap ada, dan approval lama tidak dapat menghidupkan kembali poin yang sudah di-wipe. Quest yang masih berjalan tetap bisa diselesaikan dan menerima hadiah setelah reset.
+
+Data disimpan di tabel `guild_quests`, `guild_quest_attempts`, `guild_quest_rewards`, `guild_quest_audit`, dan `guild_quest_dashboard`, pada database yang sama. Poin diberikan bersama perubahan status dalam satu transaksi; dua member tidak dapat mengambil quest yang sama secara bersamaan. Tabel baru tidak menghapus data world boss, raid, redeem, atau gaji.
+
+Tes otomatis memeriksa alur tombol/form, Dismiss dan pembukaan ulang, claim bersamaan, deadline, Abort, revisi, approval ganda, pemulihan card setelah restart, izin leader, batas ukuran card, integrasi redeem/gaji, dan wipe. Pemakaian langsung di server Discord perlu dicoba setelah bot di Wispbyte diperbarui dan env channel diisi.
+
 ## Referensi
 
 - https://discordpy.readthedocs.io/en/stable/ext/tasks/index.html

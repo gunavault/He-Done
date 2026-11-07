@@ -427,7 +427,8 @@ class RaidService:
                 f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin\n"
                 f"Pengurangan: **{summary['deduction_points']} poin**\n"
                 f"Redeem terpakai: **{summary['redeem_points']} poin**\n"
-                f"Gaji diterima: **{self.store.salary_summary(self.guild_id, member.id)['points']} poin**",
+                f"Gaji diterima: **{self.store.salary_summary(self.guild_id, member.id)['points']} poin**\n"
+                f"Quest selesai: **{summary['quests']} quest** · {summary['quest_points']} poin",
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())
 
         @self.bot.tree.command(name='leaderboard', description='Peringkat total poin event dan kontribusi anggota server')
@@ -439,7 +440,7 @@ class RaidService:
             rows = self.store.leaderboard(self.guild_id, halaman - 1)
             lines = [f'🏆 **Leaderboard — halaman {halaman}**', 'Saldo poin setelah pengurangan dan redeem. World Boss/T-Rex: 40 · War di Savage: 50 · Rift: 35 poin.']
             for i, row in enumerate(rows, (halaman - 1) * 10 + 1):
-                lines.append(f"{i}. **<@{row['user_id']}>** — **{row['points']} poin** · {row['events']} event, {row['contributions']} contribution")
+                lines.append(f"{i}. **<@{row['user_id']}>** — **{row['points']} poin** · {row['events']} event, {row['contributions']} contribution, {row['quests']} quest")
             if not rows:
                 lines.append('Belum ada poin pada halaman ini.')
             await interaction.response.send_message('\n'.join(lines), allowed_mentions=discord.AllowedMentions.none())
