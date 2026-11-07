@@ -11,6 +11,7 @@ from discord import app_commands
 from schedule import WIB
 
 log = logging.getLogger('trex.quests')
+PRIVATE_DISMISS_SECONDS = 20
 LABELS = {'available': 'Tersedia', 'in_progress': 'Dikerjakan', 'submitted': 'Menunggu persetujuan',
           'completed': 'Selesai', 'withdrawn': 'Ditarik'}
 
@@ -106,6 +107,7 @@ class QuestChoiceView(QuestView):
                     elif item.label in ('Setujui Selesai', 'Minta Revisi'):
                         item.disabled = self.snapshot['status'] != 'submitted'
                 await interaction.response.edit_message(embed=service.quest_embed(self.snapshot, leader=leader), view=self)
+                await service.dismiss_later(interaction)
             select.callback = choose
             self.add_item(select)
 
@@ -126,6 +128,7 @@ class QuestChoiceView(QuestView):
                 row = selected()
                 await interaction.response.send_message(f"Tarik quest #{row['id']} dari daftar tersedia?", ephemeral=True,
                     view=QuestConfirm(service, owner, 'withdraw', row))
+                await service.dismiss_later(interaction)
             async def approve(interaction):
                 row = selected()
                 await service.review(interaction, row, True)
@@ -162,6 +165,7 @@ class QuestMemberView(QuestView):
         async def abort(interaction):
             await interaction.response.send_message('Batalkan quest dan kembalikan ke daftar tersedia? Tidak ada poin diberikan.',
                 ephemeral=True, view=QuestConfirm(service, owner, 'abort', snapshot))
+            await service.dismiss_later(interaction)
         self.button('Submit Selesai', submit, style=discord.ButtonStyle.success, disabled=row['status'] != 'in_progress')
         self.button('Abort Quest', abort, style=discord.ButtonStyle.danger)
 
@@ -183,6 +187,7 @@ class QuestConfirm(QuestView):
             self.stop()
         async def cancel(interaction):
             await interaction.response.edit_message(content='Konfirmasi ditutup. Tidak ada perubahan.', embed=None, view=None)
+            await service.dismiss_later(interaction)
             self.stop()
         self.button('Ya, konfirmasi', confirm, row=0, style=discord.ButtonStyle.danger)
         self.button('Batal', cancel, row=0)
@@ -257,7 +262,39 @@ class QuestService:
         self.lock = asyncio.Lock()
         self.dirty = True
         self.next_tick = datetime.min.replace(tzinfo=WIB)
+        self._dismiss_tasks = {}
         self.register_commands()
+
+    async def dismiss_later(self, interaction, message=None):
+        """Reset expiry for a private message; never delete the public dashboard."""
+        message = message or await interaction.original_response()
+        if not message.flags.ephemeral:
+            return
+        previous = self._dismiss_tasks.pop(message.id, None)
+        if previous:
+            previous.cancel()
+
+        async def remove():
+            try:
+                await asyncio.sleep(PRIVATE_DISMISS_SECONDS)
+                await message.delete()
+            except discord.NotFound:
+                pass  # Already dismissed by the member.
+            except discord.HTTPException:
+                log.warning('Gagal menutup panel quest privat %s.', message.id, exc_info=True)
+            finally:
+                if self._dismiss_tasks.get(message.id) is asyncio.current_task():
+                    self._dismiss_tasks.pop(message.id, None)
+
+        self._dismiss_tasks[message.id] = asyncio.create_task(remove())
+
+    async def close(self):
+        tasks = list(self._dismiss_tasks.values())
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+        self._dismiss_tasks.clear()
 
     @property
     def enabled(self):
@@ -390,7 +427,8 @@ class QuestService:
         async with self.lock:
             self.expire()
             render = self.leader_render(interaction.user.id, page=page) if leader else self.member_render(interaction.user.id, page=page)
-        await interaction.edit_original_response(**render, allowed_mentions=discord.AllowedMentions.none())
+        message = await interaction.edit_original_response(**render, allowed_mentions=discord.AllowedMentions.none())
+        await self.dismiss_later(interaction, message)
 
     async def open_abort(self, interaction):
         self.require_member(interaction)
@@ -400,6 +438,7 @@ class QuestService:
             raise ValueError('Kamu tidak memiliki quest aktif untuk dibatalkan.')
         await interaction.response.send_message('Batalkan quest dan kembalikan ke daftar tersedia? Tidak ada poin diberikan.',
             ephemeral=True, view=QuestConfirm(self, interaction.user.id, 'abort', row))
+        await self.dismiss_later(interaction)
 
     async def mutate(self, interaction, operation, renderer, modal=False):
         self.require_member(interaction)
@@ -415,7 +454,8 @@ class QuestService:
             warning = await self.refresh_notice()
             if warning:
                 render['content'] = (render.get('content') or '') + warning
-        await interaction.edit_original_response(**render, allowed_mentions=discord.AllowedMentions.none())
+        message = await interaction.edit_original_response(**render, allowed_mentions=discord.AllowedMentions.none())
+        await self.dismiss_later(interaction, message)
 
     async def review(self, interaction, row, approve, note='', modal=False):
         self.require_leader(interaction)
@@ -439,7 +479,8 @@ class QuestService:
                 self.dirty = True
                 warning = await self.refresh_notice()
             if warning:
-                await interaction.followup.send(warning.strip(), ephemeral=True)
+                message = await interaction.followup.send(warning.strip(), ephemeral=True, wait=True)
             else:
                 board = self.store.quest_board(self.guild_id)
-                await interaction.followup.send(f"Card guild quest siap: https://discord.com/channels/{self.guild_id}/{board['channel_id']}/{board['message_id']}", ephemeral=True)
+                message = await interaction.followup.send(f"Card guild quest siap: https://discord.com/channels/{self.guild_id}/{board['channel_id']}/{board['message_id']}", ephemeral=True, wait=True)
+            await self.dismiss_later(interaction, message)

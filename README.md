@@ -477,7 +477,7 @@ Jika member tidak submit sampai batas waktu, bot mengembalikan quest ke daftar t
 
 ### Card, poin, dan penyimpanan
 
-Update card tidak menandai role/member berulang kali. Timestamp Discord menampilkan sisa waktu secara otomatis. Panel/konfirmasi privat bisa habis masa aktifnya; buka kembali lewat tiga tombol utama untuk data terbaru.
+Update card tidak menandai role/member berulang kali. Timestamp Discord menampilkan sisa waktu secara otomatis. Panel/konfirmasi privat guild quest otomatis hilang setelah 20 detik tanpa interaksi; setiap pembaruan panel mengulang hitungan 20 detik. Buka kembali lewat tiga tombol utama untuk data terbaru. Quest, deadline, dan poin tetap tersimpan; card utama tidak dihapus.
 
 Poin quest masuk ke saldo yang sama dengan event/kontribusi/gaji sehingga dapat dipakai redeem. Quest tidak dihitung sebagai event atau contribution. `/point` menambahkan rincian **Quest selesai** dan poin quest. `/leaderboard` menambahkan jumlah quest:
 

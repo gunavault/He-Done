@@ -351,6 +351,7 @@ class TrexBot(discord.Client):
             voice_task.cancel()
         if voice_tasks:
             await asyncio.gather(*voice_tasks, return_exceptions=True)
+        await self.quests.close()
         await self.console.close()
         self.store.close()
         self.raids.store.close()
