@@ -299,29 +299,33 @@ class QuestService:
 
     def board_embed(self):
         counts = self.store.quest_counts(self.guild_id)
-        embed = discord.Embed(title='📜 Guild Quest', description='Pilih quest, kerjakan, lalu submit untuk persetujuan Union Leader.', color=0x2ECC71)
+        sections = ['Pilih quest, kerjakan, lalu submit untuk persetujuan **Union Leader**.']
         for status, title in (('available', '🆕 Quest Baru'), ('in_progress', '⚒️ Sedang Dikerjakan'),
                               ('submitted', '🔎 Menunggu Persetujuan'), ('completed', '✅ Selesai Terbaru')):
             lines = []
             for row in self.store.quest_list(self.guild_id, status, limit=3):
-                line = f"**#{row['id']} {safe(row['title'][:45])}**\n{row['points']} poin"
-                if status == 'available':
-                    line += f" · {row['hours']} jam setelah Accept"
-                elif row['user_id']:
-                    line += f" · <@{row['user_id']}>"
-                    if status == 'in_progress':
-                        line += f" · batas <t:{timestamp(row['deadline'])}:R>"
+                line = f"> **#{row['id']}** · {safe(row['title'][:45])}"
+                if status == 'completed':
+                    line += f" · `{row['points']} poin`"
+                    if row['user_id']:
+                        line += f" · <@{row['user_id']}>"
+                else:
+                    line += f"\n> 💰 `{row['points']} poin`"
+                    if status == 'available':
+                        line += f" · ⏱️ {row['hours']} jam setelah Accept"
+                    elif row['user_id']:
+                        line += f" · 👤 <@{row['user_id']}>"
+                        if status == 'in_progress':
+                            line += f"\n> ⏰ Batas: <t:{timestamp(row['deadline'])}:R>"
                 lines.append(line)
-            value = '\n\n'.join(lines) or '—'
+            value = ('\n' if status == 'completed' else '\n\n').join(lines) or '> —'
             if counts.get(status, 0) > 3:
                 if status == 'completed':
-                    value += f"\n+{counts[status] - 3} penyelesaian lain tersimpan."
+                    value += f"\n\n-# +{counts[status] - 3} penyelesaian lain tersimpan."
                 else:
-                    value += f"\n+{counts[status] - 3} lainnya; buka panel untuk daftar lengkap."
-            if status != 'available':
-                # Discord trims ordinary blank padding; a spacer field keeps section gaps visible.
-                embed.add_field(name='\u200b', value='\u200b', inline=False)
-            embed.add_field(name=f'{title} ({counts.get(status, 0)})', value=value, inline=False)
+                    value += f"\n\n-# +{counts[status] - 3} lainnya; buka panel untuk daftar lengkap."
+            sections.append(f"### {title} `{counts.get(status, 0)}`\n{value}")
+        embed = discord.Embed(title='📜 Guild Quest', description='\n\n'.join(sections), color=0x2ECC71)
         embed.set_footer(text='Poin setelah disetujui • 1 quest aktif per anggota • Accept Quest membuka kembali panelmu')
         return embed
 
