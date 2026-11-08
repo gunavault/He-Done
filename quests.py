@@ -282,6 +282,7 @@ class QuestService:
     def quest_embed(self, row, leader=False):
         lines = [safe(row['detail']), f"\n**Hadiah:** {row['points']} poin · **Durasi:** {row['hours']} jam",
                  f"**Status:** {LABELS[row['status']]}"]
+        lines.append(f"**Dibuat oleh:** <@{row['created_by']}>")
         if row['user_id']:
             lines.append(f"**Pengambil:** <@{row['user_id']}>")
         if row['deadline']:
@@ -317,6 +318,7 @@ class QuestService:
                         line += f" · 👤 <@{row['user_id']}>"
                         if status == 'in_progress':
                             line += f"\n> ⏰ Batas: <t:{timestamp(row['deadline'])}:R>"
+                line += f"\n> 📝 Dibuat oleh: <@{row['created_by']}>"
                 lines.append(line)
             value = ('\n' if status == 'completed' else '\n\n').join(lines) or '> —'
             if counts.get(status, 0) > 3:
