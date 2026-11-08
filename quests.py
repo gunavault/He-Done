@@ -304,20 +304,24 @@ class QuestService:
                               ('submitted', '🔎 Menunggu Persetujuan'), ('completed', '✅ Selesai Terbaru')):
             lines = []
             for row in self.store.quest_list(self.guild_id, status, limit=3):
-                line = f"**#{row['id']} {safe(row['title'][:45])}** · {row['points']} poin"
+                line = f"**#{row['id']} {safe(row['title'][:45])}**\n{row['points']} poin"
                 if status == 'available':
                     line += f" · {row['hours']} jam setelah Accept"
                 elif row['user_id']:
-                    line += f"\n<@{row['user_id']}>"
+                    line += f" · <@{row['user_id']}>"
                     if status == 'in_progress':
                         line += f" · batas <t:{timestamp(row['deadline'])}:R>"
                 lines.append(line)
+            value = '\n\n'.join(lines) or '—'
             if counts.get(status, 0) > 3:
                 if status == 'completed':
-                    lines.append(f"+{counts[status] - 3} penyelesaian lain tersimpan.")
+                    value += f"\n+{counts[status] - 3} penyelesaian lain tersimpan."
                 else:
-                    lines.append(f"+{counts[status] - 3} lainnya; buka panel untuk daftar lengkap.")
-            embed.add_field(name=f'{title} ({counts.get(status, 0)})', value='\n\n'.join(lines) or '—', inline=False)
+                    value += f"\n+{counts[status] - 3} lainnya; buka panel untuk daftar lengkap."
+            if status != 'available':
+                # Discord trims ordinary blank padding; a spacer field keeps section gaps visible.
+                embed.add_field(name='\u200b', value='\u200b', inline=False)
+            embed.add_field(name=f'{title} ({counts.get(status, 0)})', value=value, inline=False)
         embed.set_footer(text='Poin setelah disetujui • 1 quest aktif per anggota • Accept Quest membuka kembali panelmu')
         return embed
 
