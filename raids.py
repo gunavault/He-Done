@@ -427,6 +427,7 @@ class RaidService:
                 f"Contribution: **{summary['contributions']} contribution** · {summary['contribution_points']} poin\n"
                 f"Pengurangan: **{summary['deduction_points']} poin**\n"
                 f"Redeem terpakai: **{summary['redeem_points']} poin**\n"
+                f"Lotre terpakai: **{self.store.lottery_spent(self.guild_id, member.id)} poin**\n"
                 f"Gaji diterima: **{self.store.salary_summary(self.guild_id, member.id)['points']} poin**\n"
                 f"Quest selesai: **{summary['quests']} quest** · {summary['quest_points']} poin",
                 ephemeral=True, allowed_mentions=discord.AllowedMentions.none())

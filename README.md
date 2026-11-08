@@ -508,3 +508,34 @@ Gaji dibayar otomatis setiap **Sabtu pukul 09:00 WIB** (diubah melalui `GAJIAN_J
 GAJIAN_JAM=09:00
 GAJIAN_CHANNEL_ID=
 ```
+
+
+## Lotre berhadiah item
+
+Administrator server dapat membuat lotre pada channel teks mana pun di server yang diatur. Bot memakai saldo poin yang sama dengan `/point` dan redeem, tanpa konfigurasi env tambahan. Bot memerlukan **View Channel**, **Send Messages**, dan **Embed Links** pada channel tujuan.
+
+```text
+/lotre judul:Lotre Senjata hadiah:Senjata T-Rex biaya:50 jam:21:00
+```
+
+`jam` adalah waktu penutupan **WIB**. Tambahkan `tanggal:YYYY-MM-DD` untuk hari lain; tanpa tanggal berarti hari ini. Waktu harus di masa depan, maksimal 30 hari. Biaya 1–1000000 poin; judul 1–100 karakter dan hadiah 1–500 karakter. Hadiah ditulis bebas, terpisah dari katalog redeem. Administrator harus menyiapkan dan menyerahkan item di game.
+
+Bot mengirim satu card publik dengan tombol **Ikut Lotre** dan **Lihat Peserta**. Anggota menekan Ikut, membaca biaya dan saldo pada konfirmasi privat, lalu **Ya, konfirmasi**. Biaya baru dipotong setelah konfirmasi. Satu anggota mendapat tepat satu tiket; klik berulang tidak memotong lagi. Tiket tidak bisa ditarik sendiri. Saldo tidak cukup atau konfirmasi setelah waktu tutup ditolak. Semua peserta mempunyai peluang yang sama; poin tiket dihabiskan, tidak dibayarkan kepada pemenang.
+
+Saat waktu tutup, bot memilih satu pemenang secara acak memakai `secrets.choice` dan menyimpan hasil sebelum memperbarui card yang sama. Nama pemenang tampil sebagai mention pada card; pembaruan tidak mengirim ping atau pesan baru. Tidak ada reroll manual. Scheduler memeriksa sekitar setiap 10 detik selama bot online. Jika bot offline, lotre yang terlewat diproses setelah tersambung kembali. Hasil yang sudah tersimpan tidak diundi ulang. Bila peserta kurang dari dua, lotre otomatis dibatalkan dan biaya dikembalikan.
+
+```text
+/lotrelihat id:1
+/lotrepeserta id:1 halaman:1
+/lotrestatus id:1 aksi:Batalkan dan refund poin
+/lotrestatus id:1 aksi:Hadiah sudah diserahkan
+```
+
+- `/lotrelihat` dan `/lotrepeserta` tersedia untuk anggota; balasan privat, daftar 20 peserta per halaman.
+- `/lotrestatus` khusus pemegang izin **Administrator** Discord, diperiksa kembali saat konfirmasi. Role leader saja tidak cukup.
+- Pembatalan membutuhkan konfirmasi, hanya sebelum waktu tutup, dan mengembalikan biaya sekali. Lotre yang sudah diundi tidak bisa dibatalkan atau diundi ulang.
+- Setelah memberikan item di game, administrator memilih **Hadiah sudah diserahkan** lalu mengonfirmasi. Ini hanya mencatat penyerahan; bot tidak mengirim item ke game.
+- `/point` menampilkan **Lotre terpakai**. Tiket mengurangi saldo dan peringkat saldo sebagaimana redeem, tanpa menambah atau mengurangi jumlah event, contribution, atau quest.
+- Data lotre, peserta, biaya, pemenang, dan audit tetap disimpan di SQLite saat restart. Card dan tombol publik dipulihkan; konfirmasi privat dibuka ulang jika sudah kedaluwarsa. Tidak ada auto-dismiss 20 detik.
+- `wipepoint HAPUS SEMUA POIN` juga menonaktifkan debit tiket lama. Peserta dan hasil tetap tersimpan; pembatalan tiket yang sudah direset tidak menciptakan saldo refund baru.
+- Jika pengiriman card gagal, data tetap tersimpan dan bot mencoba lagi. Hasil juga dapat diperiksa lewat `/lotrelihat`.

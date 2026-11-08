@@ -492,7 +492,7 @@ class DeliveryTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual({c.name for c in self.bot.tree.get_commands()},
                          {'worldbossregister', 'jadwal', 'tes', 'tesvoice', 'worldbossraid', 'rift', 'savage', 'raid', 'leaderboard', 'addpoint', 'point', 'remove',
                           'katalog', 'katalogadd', 'katalogremove', 'redeem', 'redeemhistory', 'redeemqueue', 'redeemstatus',
-                          'gajianmingguan', 'gajian', 'gajianstop', 'gajianriwayat', 'guildquest'})
+                          'gajianmingguan', 'gajian', 'gajianstop', 'gajianriwayat', 'guildquest', 'lotre', 'lotrestatus', 'lotrepeserta', 'lotrelihat'})
         # Exercise the real send_notice method with a fake Discord destination.
         channel = AsyncMock()
         role = type('FakeRole', (), {'id': 789, 'mention': '<@&789>'})()

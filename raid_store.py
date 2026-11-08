@@ -7,6 +7,7 @@ from schedule import WIB, parse_time, SUPPORTED_INDICES
 from redeem_store import RedeemStoreMixin
 from salary_store import SalaryStoreMixin
 from quest_store import QuestStoreMixin
+from lottery_store import LotteryStoreMixin
 
 
 KINDS = {'trex': 'T-Rex', 'rift': 'Rift', 'savage': 'Savage'}
@@ -33,7 +34,7 @@ def raid_time(jam, tanggal=None, now=None):
     return start
 
 
-class RaidStore(SalaryStoreMixin, RedeemStoreMixin, QuestStoreMixin):
+class RaidStore(SalaryStoreMixin, RedeemStoreMixin, QuestStoreMixin, LotteryStoreMixin):
     def __init__(self, path):
         self.db = sqlite3.connect(path, timeout=10)
         self.db.row_factory = sqlite3.Row
@@ -94,6 +95,7 @@ class RaidStore(SalaryStoreMixin, RedeemStoreMixin, QuestStoreMixin):
         self.init_redeem_tables()
         self.init_salary_tables()
         self.init_quest_tables()
+        self.init_lottery_tables()
         with self.db:
             # Replace the old CHECK(points=1) without losing existing awards.
             schema = self.db.execute("SELECT sql FROM sqlite_master WHERE name='raid_points'").fetchone()[0]
@@ -304,9 +306,13 @@ class RaidStore(SalaryStoreMixin, RedeemStoreMixin, QuestStoreMixin):
             UNION ALL
             SELECT user_id,points,0,0,0,0,0,0,0,0 FROM weekly_salary_payments WHERE guild_id=? AND voided=0{extra}
             UNION ALL
-            SELECT user_id,points,0,0,0,0,0,0,1,points FROM guild_quest_rewards WHERE guild_id=? AND voided=0{extra}'''
+            SELECT user_id,points,0,0,0,0,0,0,1,points FROM guild_quest_rewards WHERE guild_id=? AND voided=0{extra}
+            UNION ALL
+            SELECT user_id,-cost,0,0,0,0,0,0,0,0 FROM lottery_tickets
+                WHERE guild_id=? AND voided=0 AND lottery_id IN
+                    (SELECT id FROM lotteries WHERE status!='cancelled'){extra}'''
         values = [str(guild_id)] if user_id is None else [str(guild_id), str(user_id)]
-        return sql, values * 6
+        return sql, values * 7
 
     def leaderboard(self, guild_id, page=0):
         entries, params = self._point_entries(guild_id)
@@ -344,6 +350,7 @@ class RaidStore(SalaryStoreMixin, RedeemStoreMixin, QuestStoreMixin):
             self.db.execute('UPDATE redeem_orders SET voided=1 WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE weekly_salary_payments SET voided=1 WHERE guild_id=?', (str(guild_id),))
             self.db.execute('UPDATE guild_quest_rewards SET voided=1 WHERE guild_id=?', (str(guild_id),))
+            self.db.execute('UPDATE lottery_tickets SET voided=1 WHERE guild_id=?', (str(guild_id),))
             cur = self.db.execute('''INSERT INTO raid_point_resets
                 (interaction_id,guild_id,actor_id,created_at,event_awards,contributions,deductions,redemptions,quest_rewards)
                 VALUES(?,?,?,?,?,?,?,?,?)''', (str(interaction_id), str(guild_id), str(actor_id),

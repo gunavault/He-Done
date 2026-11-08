@@ -17,6 +17,7 @@ from console_commands import ConsoleCommands
 from redeem import RedeemService
 from salary import SalaryService
 from quests import QuestService
+from lottery import LotteryService
 
 ROOT = Path(__file__).resolve().parent
 log = logging.getLogger('trex')
@@ -55,6 +56,7 @@ class TrexBot(discord.Client):
         self.redeem = RedeemService(self)
         self.salary = SalaryService(self)
         self.quests = QuestService(self)
+        self.lottery = LotteryService(self)
         self.console = ConsoleCommands(self.raids)
 
     def require_timer_role(self, interaction):
@@ -200,6 +202,7 @@ class TrexBot(discord.Client):
         self.raids.restore_views()
         self.redeem.restore_views()
         self.quests.restore_views()
+        self.lottery.restore_views()
         self.console.start()
         # Sync optional /worldbossregister parameters and remove obsolete commands from this guild.
         self.tree.copy_global_to(guild=self.target_guild)
@@ -223,6 +226,7 @@ class TrexBot(discord.Client):
                      channel.guild.id, channel.id, role.id)
         await self.raids.refresh_open_cards()
         await self.quests.startup()
+        await self.lottery.tick()
 
     async def destination(self):
         guild = self.get_guild(self.guild_id)
@@ -319,6 +323,7 @@ class TrexBot(discord.Client):
             await self.deliver_due()
             await self.salary.tick()
             await self.quests.tick()
+            await self.lottery.tick()
 
     @notify.before_loop
     async def before_notify(self):
@@ -362,3 +367,4 @@ if __name__ == '__main__':
     logging.basicConfig(level=logging.INFO, format='%(asctime)s %(levelname)s %(message)s')
     token = required('DISCORD_TOKEN')
     TrexBot().run(token)
+
